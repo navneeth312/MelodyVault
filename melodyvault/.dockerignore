@@ -1,0 +1,55 @@
+# =========================================================================
+# Docker Ignore Configuration - MelodyVault Backend
+# Excludes unnecessary frontend, database, dependencies, and secrets
+# =========================================================================
+
+# Version control
+.git
+.gitignore
+.gitattributes
+.github
+
+# Node & Frontend dependencies and source
+node_modules
+dist
+build
+coverage
+src
+*.html
+vite.config.*
+tsconfig*.json
+tailwind.config.*
+postcss.config.*
+eslint.config.*
+package.json
+package-lock.json
+
+# Exclude public frontend assets EXCEPT the 19 demo music files
+public/*
+!public/demo-music
+!public/demo-music/**
+
+# Secrets and local environments
+.env*
+!.env.example
+*.key
+*.pem
+*.crt
+
+# Backend local build artifacts & database storage
+backend/target
+backend/data
+data
+*.mv.db
+*.trace.db
+*.db
+*.log
+
+# Editor & OS temporary files
+.idea
+.vscode
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
