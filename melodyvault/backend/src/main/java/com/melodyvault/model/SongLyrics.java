@@ -20,11 +20,9 @@ public class SongLyrics {
     @Column(nullable = false)
     private String artist;
 
-    @Lob
     @Column(columnDefinition = "TEXT")
     private String plainLyrics;
 
-    @Lob
     @Column(columnDefinition = "TEXT")
     private String syncedLyrics;
 

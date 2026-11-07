@@ -20,7 +20,6 @@ public class UserProfile {
     @Column(name = "display_name", nullable = false)
     private String displayName = "Navneeth.U";
 
-    @Lob
     @Column(name = "avatar_url", columnDefinition = "TEXT")
     private String avatarUrl = "/avatars/navneeth_u.jpg";
 

@@ -48,8 +48,7 @@ public class CatalogueTrack {
     @Column(name = "attribution", length = 1024)
     private String attribution;
 
-    @Lob
-    @Column(name = "lyrics")
+    @Column(name = "lyrics", columnDefinition = "TEXT")
     private String lyrics;
 
     @Column(name = "is_playable", nullable = false)
