@@ -8,6 +8,7 @@ import {
   ListPlus,
   LayoutGrid,
   List,
+  Rows,
   ArrowUpDown,
   Volume2,
   Radio,
@@ -24,10 +25,11 @@ import {
 } from 'lucide-react';
 import { useMusic } from '../context/MusicContext';
 import { Song } from '../types';
-import { formatDuration } from '../utils/pureLogic';
+import { formatDuration, isPlayableSong } from '../utils/pureLogic';
 import { isSongWithLocalAudio } from '../utils/bulkDelete';
 import { BulkSelectionToolbar } from '../components/BulkSelectionToolbar';
 import { BulkDeleteConfirmModal } from '../components/modals/BulkDeleteConfirmModal';
+import { SongArtwork } from '../components/common/SongArtwork';
 
 interface MusicLibraryViewProps {
   onOpenAddSong: () => void;
@@ -37,6 +39,7 @@ interface MusicLibraryViewProps {
 
 type SortField = 'title' | 'artist' | 'album' | 'duration' | 'year' | 'playCount';
 type SortOrder = 'asc' | 'desc';
+type ViewMode = 'table' | 'compact' | 'grid';
 
 export const MusicLibraryView: React.FC<MusicLibraryViewProps> = ({
   onOpenAddSong,
@@ -57,9 +60,11 @@ export const MusicLibraryView: React.FC<MusicLibraryViewProps> = ({
     undoLastDelete,
     deletedBatchBackup,
     clearDeletedBatchBackup,
+    syncLocalSampleMusic,
   } = useMusic();
 
-  const [viewMode, setViewMode] = useState<'table' | 'grid'>('table');
+  const [viewMode, setViewMode] = useState<ViewMode>('table');
+  const [filterSource, setFilterSource] = useState<'all' | 'public_catalogue' | 'user_import'>('all');
   const [filterGenre, setFilterGenre] = useState<string>('all');
   const [filterLanguage, setFilterLanguage] = useState<string>('all');
   const [filterMood, setFilterMood] = useState<string>('all');
@@ -69,11 +74,15 @@ export const MusicLibraryView: React.FC<MusicLibraryViewProps> = ({
   const [sortOrder, setSortOrder] = useState<SortOrder>('asc');
 
   // Multi-selection state
+  const [isSelectMode, setIsSelectMode] = useState<boolean>(false);
   const [selectedSongIds, setSelectedSongIds] = useState<Set<string>>(new Set());
   const [isBulkDeleteModalOpen, setIsBulkDeleteModalOpen] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
 
-  // Extract unique genres, languages, moods
+  // Extract unique genres, languages, moods & counts
+  const catalogueCount = useMemo(() => songs.filter((s) => s.source === 'public_catalogue').length, [songs]);
+  const personalCount = useMemo(() => songs.filter((s) => s.source === 'user_import').length, [songs]);
+
   const genres = useMemo(() => ['all', ...Array.from(new Set(songs.map((s) => s.genre)))], [songs]);
   const languages = useMemo(() => ['all', ...Array.from(new Set(songs.map((s) => s.language)))], [songs]);
   const moods = useMemo(() => ['all', ...Array.from(new Set(songs.map((s) => s.mood)))], [songs]);
@@ -82,6 +91,10 @@ export const MusicLibraryView: React.FC<MusicLibraryViewProps> = ({
   const filteredSongs = useMemo(() => {
     return songs
       .filter((s) => {
+        if (filterSource !== 'all') {
+          if (filterSource === 'public_catalogue' && s.source !== 'public_catalogue') return false;
+          if (filterSource === 'user_import' && s.source !== 'user_import') return false;
+        }
         if (filterGenre !== 'all' && s.genre !== filterGenre) return false;
         if (filterLanguage !== 'all' && s.language !== filterLanguage) return false;
         if (filterMood !== 'all' && s.mood !== filterMood) return false;
@@ -107,7 +120,7 @@ export const MusicLibraryView: React.FC<MusicLibraryViewProps> = ({
         if (valA > valB) return sortOrder === 'asc' ? 1 : -1;
         return 0;
       });
-  }, [songs, filterGenre, filterLanguage, filterMood, filterAvailability, localSearch, sortField, sortOrder]);
+  }, [songs, filterSource, filterGenre, filterLanguage, filterMood, filterAvailability, localSearch, sortField, sortOrder]);
 
   const handleSort = (field: SortField) => {
     if (sortField === field) {
@@ -167,11 +180,23 @@ export const MusicLibraryView: React.FC<MusicLibraryViewProps> = ({
     setSelectedSongIds(new Set());
   };
 
+  const handleExitSelectMode = () => {
+    setIsSelectMode(false);
+    setSelectedSongIds(new Set());
+  };
+
   // Single-song delete click: select that song and open the confirmation modal
   const handleRequestSingleDelete = (song: Song, e?: React.MouseEvent) => {
     e?.stopPropagation();
     setSelectedSongIds(new Set([song.id]));
     setIsBulkDeleteModalOpen(true);
+  };
+
+  const handleCloseDeleteModal = () => {
+    setIsBulkDeleteModalOpen(false);
+    if (!isSelectMode) {
+      setSelectedSongIds(new Set());
+    }
   };
 
   // Perform delete after confirmation
@@ -183,6 +208,7 @@ export const MusicLibraryView: React.FC<MusicLibraryViewProps> = ({
     try {
       await bulkDeleteSongs(idsToDelete);
       setSelectedSongIds(new Set());
+      setIsSelectMode(false); // Exit selection mode after successful deletion
       setIsBulkDeleteModalOpen(false);
     } catch (err) {
       console.error('Failed to bulk delete songs:', err);
@@ -221,6 +247,16 @@ export const MusicLibraryView: React.FC<MusicLibraryViewProps> = ({
               <List className="w-4 h-4" />
             </button>
             <button
+              onClick={() => setViewMode('compact')}
+              className={`p-1.5 rounded-lg text-xs transition-colors cursor-pointer ${
+                viewMode === 'compact' ? 'bg-purple-600 text-white' : 'text-slate-400 hover:text-white'
+              }`}
+              title="Compact Row View"
+              aria-label="Compact Row View"
+            >
+              <Rows className="w-4 h-4" />
+            </button>
+            <button
               onClick={() => setViewMode('grid')}
               className={`p-1.5 rounded-lg text-xs transition-colors cursor-pointer ${
                 viewMode === 'grid' ? 'bg-purple-600 text-white' : 'text-slate-400 hover:text-white'
@@ -232,6 +268,27 @@ export const MusicLibraryView: React.FC<MusicLibraryViewProps> = ({
             </button>
           </div>
 
+          {/* Select Mode Toggle Button */}
+          <button
+            onClick={() => {
+              if (isSelectMode) {
+                handleExitSelectMode();
+              } else {
+                setIsSelectMode(true);
+              }
+            }}
+            className={`flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold transition-all shrink-0 cursor-pointer ${
+              isSelectMode
+                ? 'bg-purple-600 text-white shadow-md shadow-purple-900/40 border border-purple-400 ring-2 ring-purple-500/30'
+                : 'bg-[#1b1c2e] hover:bg-[#23253d] border border-purple-500/30 text-purple-200 hover:text-white hover:border-purple-400'
+            }`}
+            title={isSelectMode ? 'Exit Selection Mode' : 'Enter Selection Mode to select multiple tracks'}
+            aria-label={isSelectMode ? 'Exit Selection Mode' : 'Enter Selection Mode'}
+          >
+            <CheckSquare className={`w-4 h-4 ${isSelectMode ? 'text-white' : 'text-purple-400'}`} />
+            <span>{isSelectMode ? 'Selecting' : 'Select'}</span>
+          </button>
+
           {/* Import Songs CTA */}
           <button
             onClick={() => setIsImportModalOpen(true)}
@@ -240,6 +297,16 @@ export const MusicLibraryView: React.FC<MusicLibraryViewProps> = ({
           >
             <UploadCloud className="w-4 h-4 text-purple-400" />
             <span>Import Songs</span>
+          </button>
+
+          {/* Sync Sample Collection CTA (Manual Backup Trigger) */}
+          <button
+            onClick={() => syncLocalSampleMusic()}
+            className="flex items-center gap-1.5 px-3.5 py-2 bg-gradient-to-r from-purple-700 via-indigo-700 to-purple-800 hover:from-purple-600 hover:to-indigo-600 border border-purple-400/40 text-white rounded-xl text-xs font-semibold shadow-md shadow-purple-950/40 transition-all shrink-0 cursor-pointer"
+            title="Manual Rescan: Scan C:\MelodyVault Sample Music personal audio tracks and verify IndexedDB audio blobs & artwork"
+          >
+            <Sparkles className="w-4 h-4 text-amber-300" />
+            <span>Rescan Vault</span>
           </button>
 
           {/* Add Song CTA */}
@@ -252,6 +319,144 @@ export const MusicLibraryView: React.FC<MusicLibraryViewProps> = ({
           </button>
         </div>
       </div>
+
+      {/* Collection Source Filter Pills (All Collection vs Public Legal Catalogue vs Personal Vault) */}
+      <div className="flex items-center gap-2 flex-wrap pb-1">
+        <button
+          onClick={() => setFilterSource('all')}
+          className={`px-3.5 py-1.5 rounded-xl text-xs font-semibold transition-all cursor-pointer flex items-center gap-2 ${
+            filterSource === 'all'
+              ? 'bg-purple-600 text-white shadow-md shadow-purple-900/40 border border-purple-400'
+              : 'bg-[#151624] hover:bg-[#1f2136] text-slate-300 border border-[#26283d]'
+          }`}
+        >
+          <span>All Songs</span>
+          <span className="font-mono text-[10px] px-1.5 py-0.2 rounded-full bg-white/10">
+            {songs.length}
+          </span>
+        </button>
+
+        <button
+          onClick={() => setFilterSource('public_catalogue')}
+          className={`px-3.5 py-1.5 rounded-xl text-xs font-semibold transition-all cursor-pointer flex items-center gap-2 ${
+            filterSource === 'public_catalogue'
+              ? 'bg-purple-600 text-white shadow-md shadow-purple-900/40 border border-purple-400'
+              : 'bg-[#151624] hover:bg-[#1f2136] text-purple-300 border border-purple-500/25'
+          }`}
+          title="Explore verified public domain and CC-licensed tracks served with live streaming"
+        >
+          <Radio className="w-3.5 h-3.5 text-purple-400" />
+          <span>Public Catalogue</span>
+          <span className="font-mono text-[10px] px-1.5 py-0.2 rounded-full bg-purple-500/20 text-purple-200">
+            {catalogueCount}
+          </span>
+        </button>
+
+        <button
+          onClick={() => setFilterSource('user_import')}
+          className={`px-3.5 py-1.5 rounded-xl text-xs font-semibold transition-all cursor-pointer flex items-center gap-2 ${
+            filterSource === 'user_import'
+              ? 'bg-purple-600 text-white shadow-md shadow-purple-900/40 border border-purple-400'
+              : 'bg-[#151624] hover:bg-[#1f2136] text-cyan-300 border border-cyan-500/25'
+          }`}
+          title="Browse your locally imported MP3 & WAV audio files stored in IndexedDB"
+        >
+          <HardDrive className="w-3.5 h-3.5 text-cyan-400" />
+          <span>Personal Vault</span>
+          <span className="font-mono text-[10px] px-1.5 py-0.2 rounded-full bg-cyan-500/20 text-cyan-200">
+            {personalCount}
+          </span>
+        </button>
+      </div>
+
+      {/* Select Mode Toolbar / Action Banner */}
+      {isSelectMode && (
+        <div className="p-3.5 rounded-2xl bg-gradient-to-r from-purple-950/80 via-[#1d1732] to-[#121323] border border-purple-500/50 flex flex-wrap items-center justify-between gap-3 text-xs text-white shadow-2xl animate-in fade-in slide-in-from-top-2 duration-150">
+          <div className="flex items-center gap-3">
+            <div className="w-8 h-8 rounded-xl bg-purple-600/30 border border-purple-500/40 text-purple-300 flex items-center justify-center shrink-0">
+              <CheckSquare className="w-4 h-4" />
+            </div>
+            <div>
+              <div className="font-bold text-white flex items-center gap-2">
+                <span>Selection Mode</span>
+                <span className="font-mono text-purple-300 text-[11px] font-semibold">
+                  ({selectedSongIds.size} of {filteredSongs.length} selected)
+                </span>
+              </div>
+              <div className="text-[11px] text-slate-400 mt-0.5">
+                {selectedSongIds.size === 0
+                  ? 'Click checkboxes or track rows to select songs for bulk actions.'
+                  : `${selectedSongIds.size} song${selectedSongIds.size === 1 ? '' : 's'} ready for bulk deletion.`}
+                {selectedImportedAudioCount > 0 && (
+                  <span className="ml-2 inline-flex items-center gap-1 text-[10px] font-mono px-2 py-0.2 rounded-full bg-cyan-500/20 text-cyan-300 border border-cyan-500/30">
+                    <HardDrive className="w-2.5 h-2.5" />
+                    <span>{selectedImportedAudioCount} with local audio</span>
+                  </span>
+                )}
+              </div>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2 flex-wrap ml-auto">
+            {/* Select All / Deselect All */}
+            <button
+              onClick={handleToggleSelectAllFiltered}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-[#20223a] hover:bg-[#2b2e4f] border border-[#35385e] text-slate-200 hover:text-white transition-colors cursor-pointer text-xs font-semibold"
+              title={
+                isAllFilteredSelected
+                  ? `Deselect all ${filteredSongs.length} songs in view`
+                  : `Select all ${filteredSongs.length} songs in view`
+              }
+            >
+              {isAllFilteredSelected ? (
+                <>
+                  <X className="w-3.5 h-3.5 text-slate-400" />
+                  <span>Deselect All</span>
+                </>
+              ) : (
+                <>
+                  <Check className="w-3.5 h-3.5 text-purple-400" />
+                  <span>Select All ({filteredSongs.length})</span>
+                </>
+              )}
+            </button>
+
+            {selectedSongIds.size > 0 && (
+              <button
+                onClick={handleDeselectAll}
+                className="px-2.5 py-1.5 rounded-xl text-slate-400 hover:text-white hover:bg-white/5 transition-colors cursor-pointer text-xs"
+                title="Clear selected songs"
+              >
+                Clear
+              </button>
+            )}
+
+            {/* Bulk Delete Button */}
+            <button
+              onClick={() => setIsBulkDeleteModalOpen(true)}
+              disabled={selectedSongIds.size === 0}
+              className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-gradient-to-r from-rose-600 to-red-600 hover:from-rose-500 hover:to-red-500 disabled:opacity-40 disabled:cursor-not-allowed text-white font-bold shadow-md shadow-rose-950/50 transition-all cursor-pointer"
+              title={
+                selectedSongIds.size === 0
+                  ? 'Select songs to delete'
+                  : `Delete ${selectedSongIds.size} selected song${selectedSongIds.size === 1 ? '' : 's'}`
+              }
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+              <span>Delete ({selectedSongIds.size})</span>
+            </button>
+
+            {/* Cancel / Exit Selection Mode */}
+            <button
+              onClick={handleExitSelectMode}
+              className="px-3 py-1.5 rounded-xl bg-[#1a1b2d] hover:bg-[#252741] border border-[#2f3252] text-slate-300 hover:text-white transition-colors cursor-pointer text-xs font-semibold"
+              title="Exit selection mode"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Inline Undo Alert for Recently Deleted Songs */}
       {deletedBatchBackup && (
@@ -467,41 +672,43 @@ export const MusicLibraryView: React.FC<MusicLibraryViewProps> = ({
           </button>
         </div>
       ) : viewMode === 'table' ? (
-        /* Table View */
+        /* Table View with Controlled Horizontal Scroll and Balanced Column Budget */
         <div className="bg-[#12131f] border border-[#212338] rounded-2xl overflow-hidden shadow-xl">
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs text-slate-300">
+          <div className="w-full overflow-x-auto scrollbar-thin">
+            <table className="w-full text-left text-xs text-slate-300 min-w-[1020px] lg:min-w-[1080px]">
               <thead className="bg-[#0f1019] text-[11px] font-semibold text-slate-400 uppercase tracking-wider border-b border-[#212338] select-none">
                 <tr>
-                  {/* Select All Checkbox Column */}
-                  <th className="py-3 px-3 w-10 text-center">
-                    <button
-                      type="button"
-                      onClick={handleToggleSelectAllFiltered}
-                      className="p-1 rounded text-slate-400 hover:text-white transition-colors cursor-pointer inline-flex items-center justify-center"
-                      title={
-                        isAllFilteredSelected
-                          ? 'Deselect all songs in view'
-                          : `Select all ${filteredSongs.length} songs in view`
-                      }
-                      aria-label="Toggle select all in current view"
-                    >
-                      {isAllFilteredSelected ? (
-                        <CheckSquare className="w-4 h-4 text-purple-400" />
-                      ) : isSomeFilteredSelected ? (
-                        <MinusSquare className="w-4 h-4 text-purple-400" />
-                      ) : (
-                        <Square className="w-4 h-4 text-slate-500 hover:text-slate-300" />
-                      )}
-                    </button>
-                  </th>
+                  {/* Select Checkbox Column - Only visible in Select Mode */}
+                  {isSelectMode && (
+                    <th className="py-2.5 px-2 w-12 text-center shrink-0">
+                      <button
+                        type="button"
+                        onClick={handleToggleSelectAllFiltered}
+                        className="p-1 rounded text-slate-400 hover:text-white transition-colors cursor-pointer inline-flex items-center justify-center"
+                        title={
+                          isAllFilteredSelected
+                            ? 'Deselect all songs in view'
+                            : `Select all ${filteredSongs.length} songs in view`
+                        }
+                        aria-label="Toggle select all in current view"
+                      >
+                        {isAllFilteredSelected ? (
+                          <CheckSquare className="w-4 h-4 text-purple-400" />
+                        ) : isSomeFilteredSelected ? (
+                          <MinusSquare className="w-4 h-4 text-purple-400" />
+                        ) : (
+                          <Square className="w-4 h-4 text-slate-500 hover:text-slate-300" />
+                        )}
+                      </button>
+                    </th>
+                  )}
 
                   {/* Play / Index */}
-                  <th className="py-3 px-2 w-10 text-center">#</th>
+                  <th className="py-2.5 px-2 w-12 text-center shrink-0">#</th>
 
-                  {/* Title */}
+                  {/* Title (Flexible width) */}
                   <th
-                    className="py-3 px-4 cursor-pointer hover:text-white transition-colors"
+                    className="py-2.5 px-3 cursor-pointer hover:text-white transition-colors w-[28%] min-w-[210px]"
                     onClick={() => handleSort('title')}
                   >
                     <div className="flex items-center gap-1.5">
@@ -512,7 +719,7 @@ export const MusicLibraryView: React.FC<MusicLibraryViewProps> = ({
 
                   {/* Artist */}
                   <th
-                    className="py-3 px-4 cursor-pointer hover:text-white transition-colors"
+                    className="py-2.5 px-3 cursor-pointer hover:text-white transition-colors w-[18%] min-w-[130px]"
                     onClick={() => handleSort('artist')}
                   >
                     <div className="flex items-center gap-1.5">
@@ -523,7 +730,7 @@ export const MusicLibraryView: React.FC<MusicLibraryViewProps> = ({
 
                   {/* Album */}
                   <th
-                    className="py-3 px-4 hidden md:table-cell cursor-pointer hover:text-white transition-colors"
+                    className="py-2.5 px-3 hidden md:table-cell cursor-pointer hover:text-white transition-colors w-[16%] min-w-[120px]"
                     onClick={() => handleSort('album')}
                   >
                     <div className="flex items-center gap-1.5">
@@ -532,11 +739,18 @@ export const MusicLibraryView: React.FC<MusicLibraryViewProps> = ({
                     </div>
                   </th>
 
-                  <th className="py-3 px-4 hidden lg:table-cell">Genre & Lang</th>
-                  <th className="py-3 px-4 hidden xl:table-cell">Mood</th>
-                  <th className="py-3 px-4 text-center">Audio</th>
+                  {/* Genre & Lang */}
+                  <th className="py-2.5 px-2.5 hidden lg:table-cell w-[14%] min-w-[110px]">Genre & Lang</th>
+
+                  {/* Mood */}
+                  <th className="py-2.5 px-2 hidden xl:table-cell w-[10%] min-w-[85px]">Mood</th>
+
+                  {/* Audio */}
+                  <th className="py-2.5 px-2 text-center w-28 shrink-0">Audio</th>
+
+                  {/* Time */}
                   <th
-                    className="py-3 px-4 text-right cursor-pointer hover:text-white transition-colors"
+                    className="py-2.5 px-2 text-right cursor-pointer hover:text-white transition-colors w-20 shrink-0 pr-3"
                     onClick={() => handleSort('duration')}
                   >
                     <div className="flex items-center justify-end gap-1.5">
@@ -544,18 +758,23 @@ export const MusicLibraryView: React.FC<MusicLibraryViewProps> = ({
                       <span>Time</span>
                     </div>
                   </th>
-                  <th className="py-3 px-4 text-right">Actions</th>
+
+                  {/* Actions (Always visible at the right side) */}
+                  <th className="py-2.5 px-3 text-right w-36 min-w-[148px] shrink-0 pr-4">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-[#1e2030]">
-                {filteredSongs.map((song, index) => {
+                {filteredSongs.map((song) => {
                   const isCurrent = currentSong?.id === song.id;
                   const isSelected = selectedSongIds.has(song.id);
 
                   return (
                     <tr
                       key={song.id}
+                      onClick={isSelectMode && song.source !== 'public_catalogue' ? () => toggleSelectSong(song.id) : undefined}
                       className={`hover:bg-[#18192a] group transition-colors ${
+                        isSelectMode && song.source !== 'public_catalogue' ? 'cursor-pointer' : ''
+                      } ${
                         isSelected
                           ? 'bg-purple-950/45 border-l-2 border-purple-500'
                           : isCurrent
@@ -563,28 +782,45 @@ export const MusicLibraryView: React.FC<MusicLibraryViewProps> = ({
                           : ''
                       }`}
                     >
-                      {/* Checkbox Column */}
-                      <td className="py-3 px-3 text-center">
-                        <label
-                          className="inline-flex items-center justify-center p-1 cursor-pointer"
-                          onClick={(e) => e.stopPropagation()}
-                        >
-                          <input
-                            type="checkbox"
-                            checked={isSelected}
-                            onChange={(e) => toggleSelectSong(song.id, e)}
-                            className="w-4 h-4 rounded border-[#383a59] bg-[#161729] text-purple-600 focus:ring-purple-500/40 focus:ring-offset-0 cursor-pointer accent-purple-600"
-                            aria-label={`Select ${song.title}`}
-                          />
-                        </label>
-                      </td>
+                      {/* Checkbox Column - Only rendered in Select Mode */}
+                      {isSelectMode && (
+                        <td className="py-2.5 px-2 text-center shrink-0 w-12">
+                          {song.source === 'public_catalogue' ? (
+                            <span className="text-slate-600 text-[10px]" title="System track">·</span>
+                          ) : (
+                            <label
+                              className="inline-flex items-center justify-center p-1 cursor-pointer"
+                              onClick={(e) => e.stopPropagation()}
+                            >
+                              <input
+                                type="checkbox"
+                                checked={isSelected}
+                                onChange={(e) => toggleSelectSong(song.id, e)}
+                                className="w-4 h-4 rounded border-[#383a59] bg-[#161729] text-purple-600 focus:ring-purple-500/40 focus:ring-offset-0 cursor-pointer accent-purple-600"
+                                aria-label={`Select ${song.title}`}
+                              />
+                            </label>
+                          )}
+                        </td>
+                      )}
 
                       {/* Play / Index */}
-                      <td className="py-3 px-2 text-center">
+                      <td className="py-2.5 px-2 text-center shrink-0 w-12">
                         <button
-                          onClick={() => playSong(song)}
-                          className="w-7 h-7 rounded-full flex items-center justify-center text-slate-400 group-hover:text-white group-hover:bg-purple-600 transition-all mx-auto cursor-pointer"
-                          title={`Play ${song.title}`}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            playSong(song);
+                          }}
+                          className={`w-7 h-7 rounded-full flex items-center justify-center transition-all mx-auto cursor-pointer ${
+                            isPlayableSong(song)
+                              ? 'text-slate-400 group-hover:text-white group-hover:bg-purple-600'
+                              : 'text-slate-600 hover:text-slate-500 hover:bg-slate-800/40 opacity-50'
+                          }`}
+                          title={
+                            isPlayableSong(song)
+                              ? `Play ${song.title}`
+                              : `Cannot play: Manual catalogue entry (No local audio)`
+                          }
                           aria-label={`Play ${song.title}`}
                         >
                           {isCurrent && isPlaying ? (
@@ -595,17 +831,17 @@ export const MusicLibraryView: React.FC<MusicLibraryViewProps> = ({
                         </button>
                       </td>
 
-                      {/* Title & Artwork */}
-                      <td className="py-3 px-4">
-                        <div className="flex items-center gap-3 min-w-0">
-                          <img
+                      {/* Title & Artwork (Flexible width + tooltip on hover) */}
+                      <td className="py-2.5 px-3 min-w-0">
+                        <div className="flex items-center gap-2.5 min-w-0">
+                          <SongArtwork
                             src={song.artwork}
                             alt={song.title}
-                            className={`w-10 h-10 rounded-lg object-cover shrink-0 transition-transform ${
+                            className={`w-9 h-9 rounded-lg object-cover shrink-0 transition-transform ${
                               isSelected ? 'ring-2 ring-purple-500/70' : ''
                             }`}
                           />
-                          <div className="min-w-0">
+                          <div className="min-w-0 flex-1">
                             <div
                               className={`font-semibold truncate ${
                                 isSelected
@@ -614,10 +850,11 @@ export const MusicLibraryView: React.FC<MusicLibraryViewProps> = ({
                                   ? 'text-purple-300'
                                   : 'text-slate-100'
                               }`}
+                              title={song.title}
                             >
                               {song.title}
                             </div>
-                            <div className="text-[11px] text-slate-400 md:hidden truncate">
+                            <div className="text-[11px] text-slate-400 md:hidden truncate" title={song.artist}>
                               {song.artist}
                             </div>
                           </div>
@@ -625,62 +862,64 @@ export const MusicLibraryView: React.FC<MusicLibraryViewProps> = ({
                       </td>
 
                       {/* Artist */}
-                      <td className="py-3 px-4 text-slate-300 truncate">{song.artist}</td>
+                      <td className="py-2.5 px-3 text-slate-300 truncate" title={song.artist}>
+                        {song.artist}
+                      </td>
 
                       {/* Album */}
-                      <td className="py-3 px-4 hidden md:table-cell text-slate-400 truncate">
+                      <td className="py-2.5 px-3 hidden md:table-cell text-slate-400 truncate" title={`${song.album} (${song.year})`}>
                         {song.album} ({song.year})
                       </td>
 
                       {/* Genre & Language */}
-                      <td className="py-3 px-4 hidden lg:table-cell">
-                        <div className="flex items-center gap-1.5 text-[11px] text-slate-400">
-                          <span className="text-slate-300">{song.genre}</span>
+                      <td className="py-2.5 px-2.5 hidden lg:table-cell truncate" title={`${song.genre} · ${song.language}`}>
+                        <div className="flex items-center gap-1.5 text-[11px] text-slate-400 truncate">
+                          <span className="text-slate-300 truncate">{song.genre}</span>
                           <span>·</span>
-                          <span className="text-slate-400">{song.language}</span>
+                          <span className="text-slate-400 truncate">{song.language}</span>
                         </div>
                       </td>
 
                       {/* Mood */}
-                      <td className="py-3 px-4 hidden xl:table-cell">
-                        <span className="text-[11px] text-purple-300/80 bg-purple-500/10 px-2 py-0.5 rounded">
+                      <td className="py-2.5 px-2 hidden xl:table-cell truncate">
+                        <span className="text-[11px] text-purple-300/80 bg-purple-500/10 px-2 py-0.5 rounded truncate inline-block max-w-full">
                           {song.mood}
                         </span>
                       </td>
 
                       {/* Audio Status */}
-                      <td className="py-3 px-4 text-center">
-                        {song.audioAvailability === 'local_file' && (
+                      <td className="py-2.5 px-2 text-center shrink-0 w-28">
+                        {song.source === 'public_catalogue' ? (
+                          <span
+                            className="text-[9px] font-mono px-2 py-0.5 rounded bg-purple-500/15 text-purple-300 border border-purple-500/30 font-bold inline-flex items-center gap-1"
+                            title={`Authorized Public Stream: ${song.licence || 'Public Domain'}`}
+                          >
+                            <Radio className="w-2.5 h-2.5 text-purple-400" />
+                            <span>CATALOGUE</span>
+                          </span>
+                        ) : isPlayableSong(song) ? (
                           <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-cyan-500/15 text-cyan-300 border border-cyan-500/30 font-bold inline-flex items-center gap-1">
                             <HardDrive className="w-2.5 h-2.5" />
                             <span>{song.fileName?.toLowerCase().endsWith('.wav') ? 'LOCAL WAV' : 'LOCAL MP3'}</span>
                           </span>
-                        )}
-                        {song.audioAvailability === 'stream' && (
-                          <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-                            HD
-                          </span>
-                        )}
-                        {song.audioAvailability === 'preview' && (
-                          <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-purple-500/10 text-purple-300 border border-purple-500/20">
-                            SYNTH
-                          </span>
-                        )}
-                        {song.audioAvailability === 'metadata_only' && (
-                          <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-400 border border-amber-500/20">
-                            CATALOG
+                        ) : (
+                          <span
+                            className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-400 border border-amber-500/20 font-medium"
+                            title="Catalog metadata only (No local audio binary)"
+                          >
+                            METADATA
                           </span>
                         )}
                       </td>
 
                       {/* Duration */}
-                      <td className="py-3 px-4 text-right font-mono tabular-nums text-slate-400 text-xs">
+                      <td className="py-2.5 px-2 text-right font-mono tabular-nums text-slate-400 text-xs shrink-0 pr-3">
                         {formatDuration(song.duration)}
                       </td>
 
-                      {/* Action buttons */}
-                      <td className="py-3 px-4 text-right">
-                        <div className="flex items-center justify-end gap-1">
+                      {/* Action buttons (Right side, always accessible without horizontal collision) */}
+                      <td className="py-2.5 px-3 text-right shrink-0 pr-4 w-36 min-w-[148px]" onClick={(e) => e.stopPropagation()}>
+                        <div className="flex items-center justify-end gap-1.5">
                           <button
                             onClick={() => toggleFavorite(song.id)}
                             className={`p-1.5 rounded-lg transition-colors cursor-pointer ${
@@ -696,8 +935,13 @@ export const MusicLibraryView: React.FC<MusicLibraryViewProps> = ({
 
                           <button
                             onClick={() => addToQueue(song)}
-                            className="p-1.5 text-slate-500 hover:text-purple-300 rounded-lg hover:bg-slate-800 transition-colors cursor-pointer"
-                            title="Add to Up Next Queue"
+                            disabled={!isPlayableSong(song)}
+                            className={`p-1.5 rounded-lg transition-colors cursor-pointer ${
+                              isPlayableSong(song)
+                                ? 'text-slate-500 hover:text-purple-300 hover:bg-slate-800'
+                                : 'text-slate-700 cursor-not-allowed opacity-40'
+                            }`}
+                            title={isPlayableSong(song) ? 'Add to Up Next Queue' : 'Only playable audio tracks can be queued'}
                             aria-label="Add to Queue"
                           >
                             <Plus className="w-3.5 h-3.5" />
@@ -712,23 +956,41 @@ export const MusicLibraryView: React.FC<MusicLibraryViewProps> = ({
                             <ListPlus className="w-3.5 h-3.5" />
                           </button>
 
-                          <button
-                            onClick={() => onOpenEditSong(song)}
-                            className="p-1.5 text-slate-500 hover:text-slate-300 rounded-lg hover:bg-slate-800 transition-colors cursor-pointer"
-                            title="Edit Record"
-                            aria-label="Edit Song"
-                          >
-                            <Edit2 className="w-3.5 h-3.5" />
-                          </button>
+                          {song.source === 'public_catalogue' ? (
+                            <span
+                              className="p-1.5 text-slate-700 cursor-not-allowed opacity-30 inline-flex items-center justify-center"
+                              title="Public catalogue track (System item - read only)"
+                            >
+                              <Edit2 className="w-3.5 h-3.5" />
+                            </span>
+                          ) : (
+                            <button
+                              onClick={() => onOpenEditSong(song)}
+                              className="p-1.5 text-slate-500 hover:text-slate-300 rounded-lg hover:bg-slate-800 transition-colors cursor-pointer"
+                              title="Edit Record"
+                              aria-label="Edit Song"
+                            >
+                              <Edit2 className="w-3.5 h-3.5" />
+                            </button>
+                          )}
 
-                          <button
-                            onClick={(e) => handleRequestSingleDelete(song, e)}
-                            className="p-1.5 text-slate-500 hover:text-rose-400 rounded-lg hover:bg-slate-800 transition-colors cursor-pointer"
-                            title="Delete Song"
-                            aria-label={`Delete ${song.title}`}
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
+                          {song.source === 'public_catalogue' ? (
+                            <span
+                              className="p-1.5 text-slate-700 cursor-not-allowed opacity-30 inline-flex items-center justify-center"
+                              title="Public catalogue track (System item - cannot delete)"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </span>
+                          ) : (
+                            <button
+                              onClick={(e) => handleRequestSingleDelete(song, e)}
+                              className="p-1.5 text-slate-500 hover:text-rose-400 rounded-lg hover:bg-slate-800 transition-colors cursor-pointer"
+                              title="Delete Song"
+                              aria-label={`Delete ${song.title}`}
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          )}
                         </div>
                       </td>
                     </tr>
@@ -737,6 +999,215 @@ export const MusicLibraryView: React.FC<MusicLibraryViewProps> = ({
               </tbody>
             </table>
           </div>
+        </div>
+      ) : viewMode === 'compact' ? (
+        /* Compact Row View (2 lines per track, dense layout, zero horizontal overflow) */
+        <div className="space-y-1.5">
+          {filteredSongs.map((song) => {
+            const isCurrent = currentSong?.id === song.id;
+            const isSelected = selectedSongIds.has(song.id);
+
+            return (
+              <div
+                key={song.id}
+                onClick={isSelectMode ? () => toggleSelectSong(song.id) : undefined}
+                className={`p-2.5 rounded-xl border transition-all ${
+                  isSelectMode ? 'cursor-pointer' : ''
+                } ${
+                  isSelected
+                    ? 'bg-purple-950/45 border-purple-500 shadow-md shadow-purple-950/40'
+                    : isCurrent
+                    ? 'bg-purple-950/25 border-purple-500/40'
+                    : 'bg-[#12131f] hover:bg-[#18192a] border-[#212338]'
+                }`}
+              >
+                <div className="flex items-center justify-between gap-3 min-w-0">
+                  {/* Left: Checkbox (Select Mode), Play button, Artwork, and Line 1 + Line 2 */}
+                  <div className="flex items-center gap-3 min-w-0 flex-1">
+                    {/* Checkbox (Select Mode only) */}
+                    {isSelectMode && (
+                      <div
+                        className="shrink-0"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={isSelected}
+                          onChange={(e) => toggleSelectSong(song.id, e)}
+                          className="w-4 h-4 rounded border-[#383a59] bg-[#161729] text-purple-600 focus:ring-purple-500/40 cursor-pointer accent-purple-600"
+                          aria-label={`Select ${song.title}`}
+                        />
+                      </div>
+                    )}
+
+                    {/* Play Button */}
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        playSong(song);
+                      }}
+                      className={`w-8 h-8 rounded-full shrink-0 flex items-center justify-center transition-all cursor-pointer ${
+                        isPlayableSong(song)
+                          ? isCurrent && isPlaying
+                            ? 'bg-purple-600 text-white shadow-md shadow-purple-900/50'
+                            : 'bg-white/5 hover:bg-purple-600 text-slate-300 hover:text-white'
+                          : 'bg-white/5 text-slate-600 cursor-not-allowed opacity-50'
+                      }`}
+                      title={
+                        isPlayableSong(song)
+                          ? `Play ${song.title}`
+                          : `Cannot play: Manual catalogue entry (No local audio)`
+                      }
+                      aria-label={`Play ${song.title}`}
+                    >
+                      {isCurrent && isPlaying ? (
+                        <Volume2 className="w-3.5 h-3.5 animate-pulse text-white" />
+                      ) : (
+                        <Play className="w-3.5 h-3.5 translate-x-0.5 fill-current" />
+                      )}
+                    </button>
+
+                    {/* Artwork thumbnail */}
+                    <div className="hidden sm:block shrink-0">
+                      <SongArtwork
+                        src={song.artwork}
+                        alt={song.title}
+                        className="w-9 h-9 rounded-lg object-cover shrink-0"
+                      />
+                    </div>
+
+                    {/* Line 1 & Line 2 Content */}
+                    <div className="min-w-0 flex-1 space-y-0.5">
+                      {/* Line 1: Title, Format Badge, Artist, Album */}
+                      <div className="flex items-center gap-2 min-w-0 flex-wrap">
+                        <span
+                          className={`font-semibold text-xs truncate max-w-[280px] sm:max-w-[340px] md:max-w-[420px] ${
+                            isSelected
+                              ? 'text-purple-200'
+                              : isCurrent
+                              ? 'text-purple-300 font-bold'
+                              : 'text-white'
+                          }`}
+                          title={song.title}
+                        >
+                          {song.title}
+                        </span>
+
+                        {/* Format / Availability Badge */}
+                        {song.source === 'public_catalogue' ? (
+                          <span className="text-[9px] font-mono px-1.5 py-0.2 rounded bg-purple-500/15 text-purple-300 border border-purple-500/30 font-semibold shrink-0">
+                            CATALOGUE
+                          </span>
+                        ) : isPlayableSong(song) ? (
+                          <span className="text-[9px] font-mono px-1.5 py-0.2 rounded bg-cyan-500/15 text-cyan-300 border border-cyan-500/30 font-semibold shrink-0">
+                            {song.fileName?.toLowerCase().endsWith('.wav') ? 'WAV' : 'MP3'}
+                          </span>
+                        ) : (
+                          <span className="text-[9px] font-mono px-1.5 py-0.2 rounded bg-amber-500/10 text-amber-400 border border-amber-500/20 font-medium shrink-0">
+                            METADATA
+                          </span>
+                        )}
+
+                        <span className="text-[11px] text-slate-400 truncate hidden xs:inline" title={song.artist}>
+                          <span className="text-slate-600 mr-1.5">•</span>
+                          {song.artist}
+                        </span>
+
+                        {song.album && (
+                          <span className="text-[11px] text-slate-500 truncate hidden md:inline" title={song.album}>
+                            <span className="text-slate-600 mr-1.5">•</span>
+                            {song.album}
+                          </span>
+                        )}
+                      </div>
+
+                      {/* Line 2: Genre · Language · Mood · Duration */}
+                      <div className="flex items-center gap-2 text-[10px] text-slate-400 truncate">
+                        <span className="text-slate-400 truncate">
+                          {song.genre}
+                          {song.language && <span className="text-slate-500"> · {song.language}</span>}
+                        </span>
+
+                        {song.mood && (
+                          <>
+                            <span className="text-slate-600">•</span>
+                            <span className="text-purple-300/80 bg-purple-500/10 px-1.5 py-0.2 rounded truncate">
+                              {song.mood}
+                            </span>
+                          </>
+                        )}
+
+                        <span className="text-slate-600">•</span>
+                        <span className="font-mono text-slate-400 tabular-nums">
+                          {formatDuration(song.duration)}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Right side: 5 Action buttons */}
+                  <div
+                    className="flex items-center gap-0.5 shrink-0"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <button
+                      onClick={() => toggleFavorite(song.id)}
+                      className={`p-1.5 rounded-lg transition-colors cursor-pointer ${
+                        song.isFavorite
+                          ? 'text-rose-500 hover:text-rose-400'
+                          : 'text-slate-500 hover:text-slate-300'
+                      }`}
+                      title={song.isFavorite ? 'In Favourites' : 'Add to Favourites'}
+                      aria-label={song.isFavorite ? 'Remove from Favourites' : 'Add to Favourites'}
+                    >
+                      <Heart className={`w-3.5 h-3.5 ${song.isFavorite ? 'fill-rose-500' : ''}`} />
+                    </button>
+
+                    <button
+                      onClick={() => addToQueue(song)}
+                      disabled={!isPlayableSong(song)}
+                      className={`p-1.5 rounded-lg transition-colors cursor-pointer ${
+                        isPlayableSong(song)
+                          ? 'text-slate-500 hover:text-purple-300 hover:bg-slate-800'
+                          : 'text-slate-700 cursor-not-allowed opacity-40'
+                      }`}
+                      title={isPlayableSong(song) ? 'Add to Up Next Queue' : 'Only imported audio tracks can be queued'}
+                      aria-label="Add to Queue"
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                    </button>
+
+                    <button
+                      onClick={() => onOpenAddToPlaylist(song)}
+                      className="p-1.5 text-slate-500 hover:text-purple-300 rounded-lg hover:bg-slate-800 transition-colors cursor-pointer"
+                      title="Add to Playlist"
+                      aria-label="Add to Playlist"
+                    >
+                      <ListPlus className="w-3.5 h-3.5" />
+                    </button>
+
+                    <button
+                      onClick={() => onOpenEditSong(song)}
+                      className="p-1.5 text-slate-500 hover:text-slate-300 rounded-lg hover:bg-slate-800 transition-colors cursor-pointer"
+                      title="Edit Record"
+                      aria-label="Edit Song"
+                    >
+                      <Edit2 className="w-3.5 h-3.5" />
+                    </button>
+
+                    <button
+                      onClick={(e) => handleRequestSingleDelete(song, e)}
+                      className="p-1.5 text-slate-500 hover:text-rose-400 rounded-lg hover:bg-slate-800 transition-colors cursor-pointer"
+                      title="Delete Song"
+                      aria-label={`Delete ${song.title}`}
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
         </div>
       ) : (
         /* Card Grid View */
@@ -748,8 +1219,10 @@ export const MusicLibraryView: React.FC<MusicLibraryViewProps> = ({
             return (
               <div
                 key={song.id}
-                onClick={() => toggleSelectSong(song.id)}
-                className={`p-3 rounded-2xl bg-[#131422] hover:bg-[#191a2e] border transition-all group flex flex-col justify-between relative cursor-pointer select-none ${
+                onClick={isSelectMode ? () => toggleSelectSong(song.id) : undefined}
+                className={`p-3 rounded-2xl bg-[#131422] hover:bg-[#191a2e] border transition-all group flex flex-col justify-between relative select-none ${
+                  isSelectMode ? 'cursor-pointer' : ''
+                } ${
                   isSelected
                     ? 'border-purple-500 bg-[#1a1730] shadow-xl shadow-purple-900/40 ring-1 ring-purple-500/50'
                     : isCurrent
@@ -759,35 +1232,38 @@ export const MusicLibraryView: React.FC<MusicLibraryViewProps> = ({
               >
                 <div>
                   <div className="relative rounded-xl overflow-hidden mb-3 aspect-square bg-slate-900 shadow">
-                    <img
+                    <SongArtwork
                       src={song.artwork}
                       alt={song.title}
                       className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                      iconClassName="w-12 h-12 text-purple-400"
                     />
 
-                    {/* Selection Checkbox Badge */}
-                    <div
-                      className="absolute top-2 left-2 z-10"
-                      onClick={(e) => e.stopPropagation()}
-                    >
-                      <button
-                        type="button"
-                        onClick={(e) => toggleSelectSong(song.id, e)}
-                        className={`w-6 h-6 rounded-lg flex items-center justify-center transition-all cursor-pointer ${
-                          isSelected
-                            ? 'bg-purple-600 text-white shadow-md shadow-purple-900/60 ring-1 ring-white/30'
-                            : 'bg-black/65 backdrop-blur-sm text-slate-300 opacity-80 group-hover:opacity-100 hover:bg-black/90'
-                        }`}
-                        title={isSelected ? 'Deselect song' : 'Select song'}
-                        aria-label={`Select ${song.title}`}
+                    {/* Selection Checkbox Badge - Only visible in Select Mode */}
+                    {isSelectMode && (
+                      <div
+                        className="absolute top-2 left-2 z-10"
+                        onClick={(e) => e.stopPropagation()}
                       >
-                        {isSelected ? (
-                          <Check className="w-3.5 h-3.5 stroke-[3]" />
-                        ) : (
-                          <Square className="w-3.5 h-3.5" />
-                        )}
-                      </button>
-                    </div>
+                        <button
+                          type="button"
+                          onClick={(e) => toggleSelectSong(song.id, e)}
+                          className={`w-6 h-6 rounded-lg flex items-center justify-center transition-all cursor-pointer ${
+                            isSelected
+                              ? 'bg-purple-600 text-white shadow-md shadow-purple-900/60 ring-1 ring-white/30'
+                              : 'bg-black/65 backdrop-blur-sm text-slate-300 opacity-80 group-hover:opacity-100 hover:bg-black/90'
+                          }`}
+                          title={isSelected ? 'Deselect song' : 'Select song'}
+                          aria-label={`Select ${song.title}`}
+                        >
+                          {isSelected ? (
+                            <Check className="w-3.5 h-3.5 stroke-[3]" />
+                          ) : (
+                            <Square className="w-3.5 h-3.5" />
+                          )}
+                        </button>
+                      </div>
+                    )}
 
                     {/* Play CTA Button */}
                     <button
@@ -795,8 +1271,12 @@ export const MusicLibraryView: React.FC<MusicLibraryViewProps> = ({
                         e.stopPropagation();
                         playSong(song);
                       }}
-                      className="absolute bottom-2.5 right-2.5 w-9 h-9 rounded-full bg-purple-600 hover:bg-purple-500 text-white flex items-center justify-center shadow-lg opacity-0 group-hover:opacity-100 hover:scale-105 transition-all cursor-pointer z-10"
-                      title={`Play ${song.title}`}
+                      className={`absolute bottom-2.5 right-2.5 w-9 h-9 rounded-full text-white flex items-center justify-center shadow-lg transition-all cursor-pointer z-10 ${
+                        isPlayableSong(song)
+                          ? 'bg-purple-600 hover:bg-purple-500 opacity-0 group-hover:opacity-100 hover:scale-105'
+                          : 'bg-slate-700/80 opacity-0 group-hover:opacity-60 cursor-not-allowed'
+                      }`}
+                      title={isPlayableSong(song) ? `Play ${song.title}` : `Cannot play: Manual catalogue entry (No local audio)`}
                     >
                       <Play className="w-4 h-4 fill-white translate-x-0.2" />
                     </button>
@@ -806,10 +1286,13 @@ export const MusicLibraryView: React.FC<MusicLibraryViewProps> = ({
                     className={`text-xs font-bold truncate ${
                       isSelected ? 'text-purple-200' : 'text-white group-hover:text-purple-300'
                     }`}
+                    title={song.title}
                   >
                     {song.title}
                   </div>
-                  <div className="text-[11px] text-slate-400 truncate mt-0.5">{song.artist}</div>
+                  <div className="text-[11px] text-slate-400 truncate mt-0.5" title={song.artist}>
+                    {song.artist}
+                  </div>
                 </div>
 
                 <div className="mt-3 pt-2 border-t border-[#1e2030] flex items-center justify-between text-[11px] text-slate-400">
@@ -831,13 +1314,15 @@ export const MusicLibraryView: React.FC<MusicLibraryViewProps> = ({
                     >
                       <ListPlus className="w-3.5 h-3.5" />
                     </button>
-                    <button
-                      onClick={(e) => handleRequestSingleDelete(song, e)}
-                      className="p-1 text-slate-500 hover:text-rose-400 cursor-pointer"
-                      title="Delete Song"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
+                    {song.source !== 'public_catalogue' && (
+                      <button
+                        onClick={(e) => handleRequestSingleDelete(song, e)}
+                        className="p-1 text-slate-500 hover:text-rose-400 cursor-pointer"
+                        title="Delete Song"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    )}
                   </div>
                 </div>
               </div>
@@ -855,12 +1340,13 @@ export const MusicLibraryView: React.FC<MusicLibraryViewProps> = ({
         onSelectAllFiltered={handleToggleSelectAllFiltered}
         onDeselectAll={handleDeselectAll}
         onRequestDelete={() => setIsBulkDeleteModalOpen(true)}
+        onCancel={handleExitSelectMode}
       />
 
       {/* Bulk & Single Delete Confirmation Modal */}
       <BulkDeleteConfirmModal
         isOpen={isBulkDeleteModalOpen}
-        onClose={() => setIsBulkDeleteModalOpen(false)}
+        onClose={handleCloseDeleteModal}
         onConfirm={handleConfirmDelete}
         selectedSongs={selectedSongsList}
         isDeleting={isDeleting}

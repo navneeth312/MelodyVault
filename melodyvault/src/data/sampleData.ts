@@ -6,15 +6,17 @@ import {
   QuestBadge,
   LeaderboardUser,
   ChallengeItem,
+  UserProfile,
+  Song,
 } from '../types';
 
 export const INITIAL_PLAYLISTS: Playlist[] = [
   {
     id: 'playlist-1',
     name: 'Midnight Coding Sessions',
-    description: 'Deep focus synthwave, chill beats, and driving rhythm for late-night Java & algorithms.',
+    description: 'Deep focus acoustics, chill beats, and driving rhythm for late-night Java & algorithms.',
     coverGradient: 'from-purple-900 via-indigo-950 to-slate-900',
-    songIds: ['song-1', 'song-3', 'song-10', 'song-12', 'song-16'],
+    songIds: [],
     createdAt: '2026-10-15T12:00:00.000Z',
     updatedAt: '2026-11-06T19:00:00.000Z',
     isPinned: true,
@@ -22,9 +24,9 @@ export const INITIAL_PLAYLISTS: Playlist[] = [
   {
     id: 'playlist-2',
     name: 'Vintage Vinyl & Coffee',
-    description: 'Warm acoustics, cozy Parisian jazz, and crackling soul melodies.',
+    description: 'Warm acoustics, cozy classical piano, and crackling soul melodies.',
     coverGradient: 'from-amber-950 via-stone-900 to-zinc-950',
-    songIds: ['song-2', 'song-4', 'song-14', 'song-19'],
+    songIds: [],
     createdAt: '2026-10-20T10:30:00.000Z',
     updatedAt: '2026-11-05T14:20:00.000Z',
     isPinned: true,
@@ -32,9 +34,9 @@ export const INITIAL_PLAYLISTS: Playlist[] = [
   {
     id: 'playlist-3',
     name: 'Campus Roadtrip Memories',
-    description: 'Golden hour anthems, acoustic guitars and sing-alongs with friends.',
+    description: 'Golden hour anthems, baroque strings and sing-alongs with friends.',
     coverGradient: 'from-violet-900 via-fuchsia-950 to-neutral-900',
-    songIds: ['song-6', 'song-9', 'song-13', 'song-26'],
+    songIds: [],
     createdAt: '2026-10-25T15:45:00.000Z',
     updatedAt: '2026-11-04T18:10:00.000Z',
     isPinned: false,
@@ -42,80 +44,18 @@ export const INITIAL_PLAYLISTS: Playlist[] = [
   {
     id: 'playlist-4',
     name: 'Gym High-Voltage Flow',
-    description: 'Pure adrenaline, heavy overdrive, and fast tempos for maximum energy.',
+    description: 'Pure adrenaline, fast tempos, and energetic strings for peak focus.',
     coverGradient: 'from-rose-950 via-purple-950 to-black',
-    songIds: ['song-7', 'song-14', 'song-20', 'song-28'],
+    songIds: [],
     createdAt: '2026-11-01T08:00:00.000Z',
     updatedAt: '2026-11-06T09:30:00.000Z',
     isPinned: false,
   },
 ];
 
-export const INITIAL_TIME_CAPSULES: TimeCapsule[] = [
-  {
-    id: 'capsule-1',
-    title: 'Finals Week Survival Mix 2026',
-    message: 'To be unlocked right after submitting the Semester Java Prototype presentation! Remember how late we stayed in the library lab.',
-    unlockDate: '2026-11-30T23:59:00.000Z',
-    songIds: ['song-1', 'song-2', 'song-12', 'song-9'],
-    isSealed: true,
-    createdAt: '2026-10-28T16:00:00.000Z',
-  },
-  {
-    id: 'capsule-2',
-    title: 'Graduation Summer Nostalgia',
-    message: 'A vault of our favorite tracks from the freshman and sophomore years. Do not open until graduation sunset!',
-    unlockDate: '2027-06-15T18:00:00.000Z',
-    songIds: ['song-6', 'song-9', 'song-4', 'song-26', 'song-2'],
-    isSealed: true,
-    createdAt: '2026-11-01T11:20:00.000Z',
-  },
-  {
-    id: 'capsule-3',
-    title: 'Midterm Break Coastal Trip [Unlocked]',
-    message: 'Songs we blasted while driving down the coast with Marcus and Priya. You survived midterms, now enjoy!',
-    unlockDate: '2026-11-01T00:00:00.000Z', // already unlocked in current date
-    songIds: ['song-9', 'song-6', 'song-3'],
-    isSealed: false,
-    createdAt: '2026-10-10T14:00:00.000Z',
-  },
-];
+export const INITIAL_TIME_CAPSULES: TimeCapsule[] = [];
 
-export const INITIAL_MEMORIES: SongMemory[] = [
-  {
-    id: 'mem-1',
-    songId: 'song-9',
-    songTitle: 'Golden Hour Memories',
-    artist: 'The Sunset Club',
-    note: 'We had this on repeat on the highway when the sun hit the windshield in orange and gold. Elena took a Polaroid of everyone laughing in the back seat.',
-    memoryDate: '2026-10-24',
-    location: 'Pacific Coast Highway, Mile 42',
-    moodTag: 'Nostalgic Joy',
-    createdAt: '2026-10-25T10:15:00.000Z',
-  },
-  {
-    id: 'mem-2',
-    songId: 'song-2',
-    songTitle: 'Rainy Cafe in Kyoto',
-    artist: 'Komorebi Duo',
-    note: 'Studying for the Data Structures exam at the campus bookstore cafe on a rainy Thursday morning. The warm matcha latte and rain against the window felt magical.',
-    memoryDate: '2026-10-18',
-    location: 'Campus Corner Cafe',
-    moodTag: 'Serene Focus',
-    createdAt: '2026-10-18T18:30:00.000Z',
-  },
-  {
-    id: 'mem-3',
-    songId: 'song-1',
-    songTitle: 'Midnight Horizon',
-    artist: 'Neon Mirage',
-    note: 'First time debugging our multithreaded audio engine pipeline at 2 AM. When the synth chords kicked in, the bug finally resolved!',
-    memoryDate: '2026-11-03',
-    location: 'Turing Computer Science Lab',
-    moodTag: 'Triumphant',
-    createdAt: '2026-11-03T02:40:00.000Z',
-  },
-];
+export const INITIAL_MEMORIES: SongMemory[] = [];
 
 export const INITIAL_BUCKET_LIST: BucketListItem[] = [
   {
@@ -245,71 +185,36 @@ export const INITIAL_BADGES: QuestBadge[] = [
   },
 ];
 
-export const DEMO_LEADERBOARD: LeaderboardUser[] = [
-  {
-    id: 'user-demo-1',
-    name: 'Elena Rostova',
-    avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100&auto=format&fit=crop&q=80',
-    xp: 2840,
-    level: 12,
-    tag: 'Demo Classmate (Music Society)',
-  },
-  {
-    id: 'user-demo-2',
-    name: 'Marcus Vance',
-    avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=100&auto=format&fit=crop&q=80',
-    xp: 2150,
-    level: 9,
-    tag: 'Demo Classmate (Lab Partner)',
-  },
-  {
-    id: 'user-current',
-    name: 'Navneeth (You)',
-    avatar: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=100&auto=format&fit=crop&q=80',
-    xp: 1420,
-    level: 6,
-    tag: 'Prototype Active User',
-    isCurrentUser: true,
-  },
-  {
-    id: 'user-demo-3',
-    name: 'Priya Sharma',
-    avatar: 'https://images.unsplash.com/photo-1517841905240-472988babdf9?w=100&auto=format&fit=crop&q=80',
-    xp: 1290,
-    level: 6,
-    tag: 'Demo Classmate (UI/UX Track)',
-  },
-  {
-    id: 'user-demo-4',
-    name: 'Alex Mercer',
-    avatar: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=100&auto=format&fit=crop&q=80',
-    xp: 850,
-    level: 4,
-    tag: 'Demo Classmate (Java CS 301)',
-  },
-];
+export const CURRENT_USER_PROFILE: UserProfile = {
+  id: 'user-navneeth',
+  name: 'Navneeth.U',
+  handle: '@navneeth',
+  avatar: '/avatars/navneeth_u.jpg',
+  tag: 'Vault Creator & Lead Architect',
+  bio: 'Curating pristine personal music collections with lossless audio in MelodyVault.',
+  joinedLeaderboard: true,
+};
 
 export const CHALLENGE_QUESTIONS: ChallengeItem[] = [
   {
     id: 'ch-1',
     type: 'guess_song',
-    title: 'Guess the Song by Melody',
-    prompt: 'Listen to the synth arpeggio snippet: "Streetlights streak through the midnight haze...". What is the song title?',
-    options: ['Midnight Horizon', 'Rainy Cafe in Kyoto', 'Electric Velvet', 'Overdrive Protocol'],
+    title: 'Acoustic Sound Identification',
+    prompt: 'Listen to the rising chord progression snippet (A4 - C5 - E5 - G5). What musical chord quality is formed?',
+    options: ['A Minor Seventh (Am7)', 'C Major Triad', 'E Suspended Fourth', 'G Dominant Seventh'],
     correctIndex: 0,
-    explanation: '"Midnight Horizon" by Neon Mirage is a signature track in the Synthetic Dreams album.',
+    explanation: 'The notes A, C, E, and G form an A Minor Seventh (Am7) chord.',
     xpReward: 50,
-    songId: 'song-1',
     audioSnippet: [440, 523, 659, 784],
   },
   {
     id: 'ch-2',
     type: 'guess_lyrics',
-    title: 'Complete the Missing Lyric',
-    prompt: 'In Claire Deval’s jazz ballad "Autumn in Montmartre", finish the line: "Les feuilles dorées tombent sur les ______"',
-    options: ['toits', 'pavés', 'jardins', 'champs'],
+    title: 'Acoustics & Sound Terminology',
+    prompt: 'In studio recording and spatial acoustics, complete the term for the psychoacoustic phenomenon where auditory cues help locate sound sources in stereo space: "The Haas ______"',
+    options: ['Equation', 'Effect', 'Filter', 'Resonance'],
     correctIndex: 1,
-    explanation: 'The lyric is: "Les feuilles dorées tombent sur les pavés" (Golden leaves fall upon the cobblestones).',
+    explanation: 'The Haas Effect (precedence effect) describes how humans perceive the spatial location of sound based on subtle microsecond arrival differences.',
     xpReward: 40,
   },
   {
@@ -325,11 +230,11 @@ export const CHALLENGE_QUESTIONS: ChallengeItem[] = [
   {
     id: 'ch-4',
     type: 'song_vs_song',
-    title: 'Auditory Showdown',
-    prompt: 'Vote for the ultimate late night vibe: "Midnight Horizon" (Synthwave) VS "Rainy Cafe in Kyoto" (Lo-Fi)',
-    options: ['Midnight Horizon (Neon & Drive)', 'Rainy Cafe in Kyoto (Coffee & Rain)'],
-    correctIndex: 0, // Any vote awards XP!
-    explanation: 'Both tracks represent pinnacle moods in the MelodyVault catalog. Your preference has been recorded!',
+    title: 'Acoustic Audio Showdown',
+    prompt: 'Cast your audiophile preference: Studio Pure Lossless Audio (FLAC/WAV PCM) vs High-Bitrate Variable Encoding (320kbps MP3/AAC)?',
+    options: ['Lossless PCM (Bit-perfect Studio Master)', 'High-Bitrate VBR (Efficient & Portable)'],
+    correctIndex: 0,
+    explanation: 'MelodyVault prioritizes pristine uncompressed lossless bitstreams while supporting high-bitrate imports.',
     xpReward: 30,
   },
   {
@@ -353,3 +258,5 @@ export const CHALLENGE_QUESTIONS: ChallengeItem[] = [
     xpReward: 100,
   },
 ];
+
+export const PUBLIC_CATALOGUE_FALLBACK_TRACKS: Song[] = [];

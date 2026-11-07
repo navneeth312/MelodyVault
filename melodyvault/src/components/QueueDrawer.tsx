@@ -2,6 +2,7 @@ import React from 'react';
 import { X, Trash2, Play, Music, Sparkles } from 'lucide-react';
 import { useMusic } from '../context/MusicContext';
 import { formatDuration } from '../utils/pureLogic';
+import { SongArtwork } from './common/SongArtwork';
 
 export const QueueDrawer: React.FC = () => {
   const {
@@ -56,7 +57,7 @@ export const QueueDrawer: React.FC = () => {
           </div>
           {currentSong ? (
             <div className="flex items-center gap-3 p-3 rounded-xl bg-purple-950/30 border border-purple-500/30">
-              <img
+              <SongArtwork
                 src={currentSong.artwork}
                 alt={currentSong.title}
                 className="w-12 h-12 rounded-lg object-cover"
@@ -106,7 +107,7 @@ export const QueueDrawer: React.FC = () => {
                     <span className="text-xs font-mono text-slate-500 w-4 text-center shrink-0">
                       {idx + 1}
                     </span>
-                    <img
+                    <SongArtwork
                       src={song.artwork}
                       alt={song.title}
                       className="w-9 h-9 rounded object-cover shrink-0"

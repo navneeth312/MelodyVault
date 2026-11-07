@@ -14,7 +14,7 @@ export interface LyricLine {
   text: string;
 }
 
-export type SongSource = 'user_import' | 'user_manual' | 'sample_demo';
+export type SongSource = 'user_import' | 'user_manual' | 'sample_demo' | 'public_catalogue';
 
 export interface Song {
   id: string;
@@ -39,6 +39,10 @@ export interface Song {
   fileSize?: number;
   mimeType?: string;
   source?: SongSource;
+  licence?: string;
+  attribution?: string;
+  streamUrl?: string;
+  isPublicCatalogue?: boolean;
 }
 
 export interface ImportFileProgress {
@@ -107,6 +111,19 @@ export interface QuestBadge {
   currentCount: number;
 }
 
+export interface UserProfile {
+  id: string;
+  name: string;
+  handle: string;
+  avatar: string;
+  tag: string;
+  bio?: string;
+  xp?: number;
+  level?: number;
+  badgesCount?: number;
+  joinedLeaderboard?: boolean;
+}
+
 export interface LeaderboardUser {
   id: string;
   name: string;
@@ -136,6 +153,8 @@ export type NavigationTab =
   | 'playlists'
   | 'favorites'
   | 'recently_played'
+  | 'leaderboard'
+  | 'games'
   | 'karaoke'
   | 'challenges'
   | 'quest'

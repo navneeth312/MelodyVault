@@ -12,11 +12,12 @@ import {
   Music,
 } from 'lucide-react';
 import { useMusic } from '../context/MusicContext';
-import { isTimeCapsuleUnlocked, formatDuration } from '../utils/pureLogic';
+import { isTimeCapsuleUnlocked, formatDuration, isPlayableSong } from '../utils/pureLogic';
+import { SongArtwork } from '../components/common/SongArtwork';
 import { TimeCapsule, Song } from '../types';
 
 export const TimeCapsuleView: React.FC = () => {
-  const { timeCapsules, songs, createTimeCapsule, deleteTimeCapsule, playSong } = useMusic();
+  const { timeCapsules, songs, createTimeCapsule, deleteTimeCapsule, playSong, showToast } = useMusic();
 
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [capsuleTitle, setCapsuleTitle] = useState('');
@@ -103,21 +104,19 @@ export const TimeCapsuleView: React.FC = () => {
           return (
             <div
               key={capsule.id}
-              className={`p-6 rounded-3xl border transition-all flex flex-col justify-between shadow-xl ${
-                isUnlocked
+              className={`p-6 rounded-3xl border transition-all flex flex-col justify-between shadow-xl ${isUnlocked
                   ? 'bg-gradient-to-b from-[#18192d] to-[#121320] border-indigo-500/40'
                   : 'bg-[#12131e] border-[#222438]'
-              }`}
+                }`}
             >
               <div className="space-y-4">
                 {/* Status chip & Countdown */}
                 <div className="flex items-center justify-between">
                   <div
-                    className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold border ${
-                      isUnlocked
+                    className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold border ${isUnlocked
                         ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30'
                         : 'bg-amber-500/15 text-amber-300 border-amber-500/30'
-                    }`}
+                      }`}
                   >
                     {isUnlocked ? <Unlock className="w-3.5 h-3.5" /> : <Lock className="w-3.5 h-3.5" />}
                     <span>{isUnlocked ? 'Unlocked' : 'Sealed & Locked'}</span>
@@ -163,9 +162,8 @@ export const TimeCapsuleView: React.FC = () => {
                     {capsuleSongs.slice(0, 3).map((song) => (
                       <div
                         key={song.id}
-                        className={`flex items-center justify-between text-xs p-1.5 rounded-lg ${
-                          isUnlocked ? 'text-slate-200' : 'text-slate-500 blur-[1px]'
-                        }`}
+                        className={`flex items-center justify-between text-xs p-1.5 rounded-lg ${isUnlocked ? 'text-slate-200' : 'text-slate-500 blur-[1px]'
+                          }`}
                       >
                         <span className="truncate">{song.title}</span>
                         <span className="text-[10px] font-mono">{formatDuration(song.duration)}</span>
@@ -185,8 +183,11 @@ export const TimeCapsuleView: React.FC = () => {
                 {isUnlocked ? (
                   <button
                     onClick={() => {
-                      if (capsuleSongs.length > 0) {
-                        playSong(capsuleSongs[0], capsuleSongs.slice(1));
+                      const playable = capsuleSongs.filter(isPlayableSong);
+                      if (playable.length > 0) {
+                        playSong(playable[0], playable.slice(1));
+                      } else {
+                        showToast('No playable imported tracks found in this time capsule.', 'info');
                       }
                     }}
                     className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white rounded-xl text-xs font-bold shadow-md shadow-emerald-950/40 transition-all"
@@ -287,14 +288,13 @@ export const TimeCapsuleView: React.FC = () => {
                         key={song.id}
                         type="button"
                         onClick={() => toggleSelectSong(song.id)}
-                        className={`w-full flex items-center justify-between p-2 rounded-lg text-left transition-colors ${
-                          isSelected
+                        className={`w-full flex items-center justify-between p-2 rounded-lg text-left transition-colors ${isSelected
                             ? 'bg-indigo-950/40 border border-indigo-500 text-indigo-200'
                             : 'hover:bg-[#1f2033] text-slate-300'
-                        }`}
+                          }`}
                       >
                         <div className="flex items-center gap-2 truncate">
-                          <img
+                          <SongArtwork
                             src={song.artwork}
                             alt={song.title}
                             className="w-7 h-7 rounded object-cover"

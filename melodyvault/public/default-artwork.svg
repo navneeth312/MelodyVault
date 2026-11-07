@@ -1,0 +1,42 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 400" width="400" height="400">
+  <defs>
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#2d1b4e" />
+      <stop offset="50%" stop-color="#181528" />
+      <stop offset="100%" stop-color="#0e0d17" />
+    </linearGradient>
+    <linearGradient id="discGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#9333ea" />
+      <stop offset="100%" stop-color="#6366f1" />
+    </linearGradient>
+    <radialGradient id="grooveGlow" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#c084fc" stop-opacity="0.3" />
+      <stop offset="100%" stop-color="#000000" stop-opacity="0" />
+    </radialGradient>
+  </defs>
+
+  <!-- Background -->
+  <rect width="400" height="400" rx="40" fill="url(#bgGrad)" />
+  <rect width="398" height="398" x="1" y="1" rx="39" fill="none" stroke="#9333ea" stroke-opacity="0.25" stroke-width="2" />
+
+  <!-- Ambient Glow -->
+  <circle cx="200" cy="200" r="160" fill="url(#grooveGlow)" />
+
+  <!-- Vinyl Outer Ring -->
+  <circle cx="200" cy="200" r="130" fill="#13141f" stroke="#383a59" stroke-width="2" />
+  <!-- Grooves -->
+  <circle cx="200" cy="200" r="110" fill="none" stroke="#25273d" stroke-width="1.5" stroke-dasharray="4 2" />
+  <circle cx="200" cy="200" r="90" fill="none" stroke="#2a2c45" stroke-width="1.5" />
+  <circle cx="200" cy="200" r="70" fill="none" stroke="#25273d" stroke-width="1.5" stroke-dasharray="3 3" />
+
+  <!-- Center Label -->
+  <circle cx="200" cy="200" r="48" fill="url(#discGrad)" />
+  <circle cx="200" cy="200" r="14" fill="#0e0d17" stroke="#ffffff" stroke-width="2" stroke-opacity="0.7" />
+
+  <!-- Music Notes / Icon Motif -->
+  <path d="M192 186 v16 a10 10 0 1 1 -6 -9 v-14 l24 -5 v12 a10 10 0 1 1 -6 -9 v-7 z" fill="#ffffff" opacity="0.9" />
+
+  <!-- MelodyVault Text -->
+  <text x="200" y="362" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="16" font-weight="700" letter-spacing="3" fill="#c084fc" opacity="0.9">MELODYVAULT</text>
+</svg>
+

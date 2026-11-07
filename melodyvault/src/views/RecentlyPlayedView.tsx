@@ -3,6 +3,7 @@ import { Clock, Play, Heart, ListPlus, Volume2 } from 'lucide-react';
 import { useMusic } from '../context/MusicContext';
 import { formatDuration } from '../utils/pureLogic';
 import { Song } from '../types';
+import { SongArtwork } from '../components/common/SongArtwork';
 
 interface RecentlyPlayedViewProps {
   onOpenAddToPlaylist: (song: Song) => void;
@@ -90,7 +91,7 @@ export const RecentlyPlayedView: React.FC<RecentlyPlayedViewProps> = ({
 
                     <td className="py-3 px-4">
                       <div className="flex items-center gap-3">
-                        <img
+                        <SongArtwork
                           src={song.artwork}
                           alt={song.title}
                           className="w-10 h-10 rounded-lg object-cover shrink-0"

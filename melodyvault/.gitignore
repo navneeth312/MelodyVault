@@ -6,3 +6,25 @@ coverage/
 *.log
 .env*
 !.env.example
+backend/target/
+data/
+*.mv.db
+*.trace.db
+backend/data/
+*.db
+*.mv.db
+*.trace.db
+*.mp3
+*.wav
+*.flac
+*.m4a
+*.aac
+*.ogg
+*.opus
+*.wma
+*.aiff
+*.alac
+
+# Approved MelodyVault demonstration tracks
+!public/demo-music/
+!public/demo-music/*.mp3

@@ -12,6 +12,8 @@ import {
 } from 'lucide-react';
 import { useMusic } from '../context/MusicContext';
 import { Song, SongMemory } from '../types';
+import { isPlayableSong } from '../utils/pureLogic';
+import { SongArtwork } from '../components/common/SongArtwork';
 
 interface SongMemoryJournalViewProps {
   onOpenAttachMemory: (song: Song) => void;
@@ -130,7 +132,7 @@ export const SongMemoryJournalView: React.FC<SongMemoryJournalViewProps> = ({
                   <div className="flex items-center justify-between pb-3 border-b border-[#1e2030]">
                     <div className="flex items-center gap-3 min-w-0">
                       {linkedSong && (
-                        <img
+                        <SongArtwork
                           src={linkedSong.artwork}
                           alt={linkedSong.title}
                           className="w-10 h-10 rounded-lg object-cover shrink-0"
@@ -146,8 +148,12 @@ export const SongMemoryJournalView: React.FC<SongMemoryJournalViewProps> = ({
 
                     <button
                       onClick={() => handlePlaySongForMemory(mem.songId)}
-                      className="w-8 h-8 rounded-full bg-purple-600/20 hover:bg-purple-600 text-purple-300 hover:text-white flex items-center justify-center shrink-0 transition-colors"
-                      title="Play Associated Track"
+                      className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 transition-colors ${
+                        isPlayableSong(linkedSong)
+                          ? 'bg-purple-600/20 hover:bg-purple-600 text-purple-300 hover:text-white'
+                          : 'bg-slate-800 text-slate-500 opacity-60'
+                      }`}
+                      title={isPlayableSong(linkedSong) ? 'Play Associated Track' : 'Manual catalogue entry (No local audio)'}
                     >
                       <Play className="w-3.5 h-3.5 fill-current translate-x-0.2" />
                     </button>

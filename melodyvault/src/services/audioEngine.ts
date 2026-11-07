@@ -1,11 +1,20 @@
 import { Song } from '../types';
+import { isPlayableSong, validateSongPlayability } from '../utils/pureLogic';
+import {
+  getAudioBlob,
+  getAudioObjectURL,
+  getInstrumentalObjectURL,
+  hasSeparatedAudio,
+} from './storageIndexedDB';
 
 export type PlayerStatus = 'idle' | 'playing' | 'paused' | 'buffering' | 'error' | 'unavailable';
+export type AudioSourceTrack = 'original' | 'instrumental';
 
 export interface AudioEngineListeners {
   onTimeUpdate?: (currentTime: number, duration: number) => void;
   onStatusChange?: (status: PlayerStatus, errorMessage?: string) => void;
   onEnded?: () => void;
+  onAudioSourceChange?: (source: AudioSourceTrack) => void;
 }
 
 class AudioEngineService {
@@ -16,18 +25,10 @@ class AudioEngineService {
   private vocalCutFilterNode: BiquadFilterNode | null = null;
   private gainNode: GainNode | null = null;
 
-  // Synth state for preview / synthetic playback
-  private synthInterval: number | null = null;
-  private synthCurrentNoteIndex = 0;
-  private synthFakeTimer: number | null = null;
-  private synthCurrentTime = 0;
-  private synthDuration = 180;
-  private isUsingSynth = false;
-
   private currentSong: Song | null = null;
   private status: PlayerStatus = 'idle';
   private volume = 0.8;
-  private isInstrumentalMode = false;
+  private audioSource: AudioSourceTrack = 'original';
   private listeners: AudioEngineListeners = {};
 
   constructor() {
@@ -41,7 +42,9 @@ class AudioEngineService {
   private initAudioNodes() {
     if (this.audioCtx) return;
     try {
-      const AudioContextClass = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+      const AudioContextClass =
+        window.AudioContext ||
+        (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
       this.audioCtx = new AudioContextClass();
 
       this.analyserNode = this.audioCtx.createAnalyser();
@@ -76,10 +79,12 @@ class AudioEngineService {
     if (!this.audioElement) return;
 
     this.audioElement.addEventListener('timeupdate', () => {
-      if (this.isUsingSynth) return;
       const cur = this.audioElement?.currentTime || 0;
       const dur = this.audioElement?.duration || this.currentSong?.duration || 0;
-      this.listeners.onTimeUpdate?.(cur, isNaN(dur) || dur <= 0 ? (this.currentSong?.duration || 180) : dur);
+      this.listeners.onTimeUpdate?.(
+        cur,
+        isNaN(dur) || dur <= 0 ? (this.currentSong?.duration || 180) : dur
+      );
     });
 
     this.audioElement.addEventListener('playing', () => {
@@ -88,7 +93,7 @@ class AudioEngineService {
     });
 
     this.audioElement.addEventListener('pause', () => {
-      if (this.status !== 'idle' && !this.isUsingSynth) {
+      if (this.status !== 'idle') {
         this.status = 'paused';
         this.listeners.onStatusChange?.('paused');
       }
@@ -99,20 +104,11 @@ class AudioEngineService {
     });
 
     this.audioElement.addEventListener('error', () => {
-      if (this.currentSong?.audioAvailability === 'local_file' || this.currentSong?.isLocalImport) {
-        this.status = 'error';
-        this.listeners.onStatusChange?.('error', 'Failed to decode local audio file.');
-        return;
-      }
-
-      // If audio file URL fails (e.g. network/CORS or unavailable stream), gracefully fallback to synth audio demo
-      console.info('Audio URL load error, switching to synthetic melody preview');
-      if (this.currentSong && this.currentSong.audioAvailability !== 'metadata_only') {
-        this.startSynthPlayback(0);
-      } else {
-        this.status = 'error';
-        this.listeners.onStatusChange?.('error', 'Audio stream unavailable for this licensed catalog item.');
-      }
+      this.status = 'error';
+      this.listeners.onStatusChange?.(
+        'error',
+        'Failed to decode local audio file. The file may be corrupted or in an unsupported format.'
+      );
     });
 
     this.audioElement.addEventListener('waiting', () => {
@@ -120,76 +116,212 @@ class AudioEngineService {
     });
   }
 
-  public async playSong(song: Song, resumeAt = 0) {
+  /**
+   * Centrally enforces that only imported local tracks (MP3/WAV) with valid
+   * blobs in IndexedDB can be played.
+   */
+  public async playSong(
+    song: Song,
+    resumeAt = 0,
+    preferredSource?: AudioSourceTrack
+  ): Promise<boolean> {
     this.initAudioNodes();
     if (this.audioCtx && this.audioCtx.state === 'suspended') {
-      await this.audioCtx.resume();
+      try {
+        await this.audioCtx.resume();
+      } catch (e) {
+        console.warn('AudioContext resume warning', e);
+      }
     }
 
-    this.stopSynthPlayback();
+    // 1. Central playability validation
+    const validation = validateSongPlayability(song);
+    if (!validation.canPlay || !isPlayableSong(song)) {
+      this.currentSong = null;
+      if (this.audioElement) {
+        this.audioElement.pause();
+        this.audioElement.src = '';
+      }
+      this.status = 'unavailable';
+      this.listeners.onStatusChange?.('unavailable', validation.message);
+      this.listeners.onTimeUpdate?.(0, song?.duration || 180);
+      return false;
+    }
+
     this.currentSong = song;
 
-    if (song.audioAvailability === 'metadata_only') {
-      this.status = 'unavailable';
-      this.listeners.onStatusChange?.('unavailable', 'This catalog record is metadata-only (licensed track with no stream).');
-      this.listeners.onTimeUpdate?.(0, song.duration);
-      return;
-    }
+    // 2. Resolve audio source URL:
+    // If public catalogue track: resolve stream URL (local backend or external authorized stream)
+    // If user imported track: validate and fetch blob from browser IndexedDB
+    try {
+      let activeUrl: string | null = null;
+      let chosenSource: AudioSourceTrack = 'original';
 
-    // Check if song is a local import stored in IndexedDB
-    if (song.audioAvailability === 'local_file' || song.isLocalImport) {
-      this.isUsingSynth = false;
-      const { getAudioObjectURL } = await import('./storageIndexedDB');
-      const blobUrl = await getAudioObjectURL(song.id);
-
-      if (blobUrl && this.audioElement) {
-        this.audioElement.src = blobUrl;
-        this.audioElement.currentTime = resumeAt;
-        this.audioElement.volume = this.volume;
-        try {
-          await this.audioElement.play();
-          this.status = 'playing';
-          this.listeners.onStatusChange?.('playing');
-          return;
-        } catch (err) {
-          console.error('Local audio playback error:', err);
+      if (song.source === 'public_catalogue') {
+        const rawStream = song.streamUrl || song.audioUrl;
+        if (!rawStream) {
+          if (this.audioElement) {
+            this.audioElement.pause();
+            this.audioElement.src = '';
+          }
           this.status = 'error';
-          this.listeners.onStatusChange?.('error', 'Browser was unable to play this local audio file.');
-          return;
+          this.listeners.onStatusChange?.('error', `Streaming audio URL missing for catalogue track "${song.title}".`);
+          return false;
         }
+        activeUrl = rawStream.startsWith('http')
+          ? rawStream
+          : `http://localhost:8085${rawStream.startsWith('/') ? '' : '/'}${rawStream}`;
+        chosenSource = 'original';
       } else {
-        this.status = 'error';
-        this.listeners.onStatusChange?.('error', 'Local audio binary not found in browser IndexedDB.');
-        return;
+        // User imported track from IndexedDB
+        const blob = await getAudioBlob(song.id);
+        if (!blob || blob.size === 0) {
+          if (this.audioElement) {
+            this.audioElement.pause();
+            this.audioElement.src = '';
+          }
+          this.status = 'error';
+          const errorMsg = `Audio file for "${song.title}" is missing from browser local storage (IndexedDB). Please re-import this track.`;
+          this.listeners.onStatusChange?.('error', errorMsg);
+          return false;
+        }
+
+        if (preferredSource === 'instrumental') {
+          const instUrl = await getInstrumentalObjectURL(song.id);
+          if (instUrl) {
+            activeUrl = instUrl;
+            chosenSource = 'instrumental';
+          }
+        }
+
+        if (!activeUrl) {
+          activeUrl = await getAudioObjectURL(song.id);
+          chosenSource = 'original';
+        }
       }
+
+      if (!activeUrl || !this.audioElement) {
+        this.status = 'error';
+        this.listeners.onStatusChange?.(
+          'error',
+          'Failed to generate audio playback URL.'
+        );
+        return false;
+      }
+
+      this.audioSource = chosenSource;
+      this.listeners.onAudioSourceChange?.(this.audioSource);
+
+      // 4. Set audio element source and begin playback
+      if (this.audioElement.src !== activeUrl) {
+        this.audioElement.src = activeUrl;
+      }
+      this.audioElement.currentTime = resumeAt;
+      this.audioElement.volume = this.volume;
+
+      try {
+        await this.audioElement.play();
+        this.status = 'playing';
+        this.listeners.onStatusChange?.('playing');
+        return true;
+      } catch (playErr) {
+        console.error('Audio playback start error:', playErr);
+        this.status = 'error';
+        this.listeners.onStatusChange?.(
+          'error',
+          'Browser blocked or failed to play this local audio file.'
+        );
+        return false;
+      }
+    } catch (dbErr) {
+      console.error('Failed to query audio blob from IndexedDB:', dbErr);
+      this.status = 'error';
+      this.listeners.onStatusChange?.(
+        'error',
+        'Could not access IndexedDB audio storage.'
+      );
+      return false;
+    }
+  }
+
+  public getAudioSource(): AudioSourceTrack {
+    return this.audioSource;
+  }
+
+  public async hasInstrumentalTrack(songId?: string): Promise<boolean> {
+    const id = songId || this.currentSong?.id;
+    if (!id) return false;
+    return hasSeparatedAudio(id);
+  }
+
+  /**
+   * Seamlessly switches audio track between Original and Instrumental
+   * while preserving exact playback position and play state.
+   */
+  public async switchAudioSource(targetSource: AudioSourceTrack): Promise<{ success: boolean; reason?: string }> {
+    if (!this.currentSong) {
+      return { success: false, reason: 'No track currently active.' };
     }
 
-    // If audioUrl is present, attempt real streaming audio
-    if (song.audioUrl) {
-      this.isUsingSynth = false;
-      if (this.audioElement) {
-        this.audioElement.src = song.audioUrl;
-        this.audioElement.currentTime = resumeAt;
-        this.audioElement.volume = this.volume;
-        try {
-          await this.audioElement.play();
-          this.status = 'playing';
-          this.listeners.onStatusChange?.('playing');
-        } catch {
-          // If browser policy blocks or fails, fallback to synth engine
-          this.startSynthPlayback(resumeAt);
-        }
+    if (targetSource === this.audioSource) {
+      return { success: true };
+    }
+
+    const currentPos = this.audioElement?.currentTime || 0;
+    const wasPlaying = this.status === 'playing';
+
+    if (targetSource === 'instrumental') {
+      const hasInst = await hasSeparatedAudio(this.currentSong.id);
+      if (!hasInst) {
+        return {
+          success: false,
+          reason: `No separated instrumental audio track exists for "${this.currentSong.title}".`,
+        };
       }
+
+      const instUrl = await getInstrumentalObjectURL(this.currentSong.id);
+      if (!instUrl || !this.audioElement) {
+        return { success: false, reason: 'Failed to access instrumental audio blob.' };
+      }
+
+      this.audioElement.src = instUrl;
+      this.audioElement.currentTime = currentPos;
+      this.audioSource = 'instrumental';
+      this.listeners.onAudioSourceChange?.('instrumental');
+
+      if (wasPlaying) {
+        await this.audioElement.play().catch(console.warn);
+      }
+      return { success: true };
     } else {
-      // Audio preview using built-in procedural synthesizer
-      this.startSynthPlayback(resumeAt);
+      let origUrl: string | null = null;
+      if (this.currentSong.source === 'public_catalogue') {
+        const rawStream = this.currentSong.streamUrl || this.currentSong.audioUrl || '';
+        origUrl = rawStream.startsWith('http')
+          ? rawStream
+          : `http://localhost:8085${rawStream.startsWith('/') ? '' : '/'}${rawStream}`;
+      } else {
+        origUrl = await getAudioObjectURL(this.currentSong.id);
+      }
+
+      if (!origUrl || !this.audioElement) {
+        return { success: false, reason: 'Failed to access original audio.' };
+      }
+
+      this.audioElement.src = origUrl;
+      this.audioElement.currentTime = currentPos;
+      this.audioSource = 'original';
+      this.listeners.onAudioSourceChange?.('original');
+
+      if (wasPlaying) {
+        await this.audioElement.play().catch(console.warn);
+      }
+      return { success: true };
     }
   }
 
   public pause() {
-    if (this.isUsingSynth) {
-      this.pauseSynthPlayback();
-    } else if (this.audioElement) {
+    if (this.audioElement) {
       this.audioElement.pause();
     }
     this.status = 'paused';
@@ -197,25 +329,27 @@ class AudioEngineService {
   }
 
   public resume() {
-    if (this.isUsingSynth) {
-      this.resumeSynthPlayback();
-    } else if (this.audioElement && (this.currentSong?.audioUrl || this.currentSong?.audioAvailability === 'local_file' || this.currentSong?.isLocalImport)) {
-      this.audioElement.play().catch(() => {
-        if (this.currentSong?.audioAvailability !== 'local_file') {
-          this.startSynthPlayback(this.audioElement?.currentTime || 0);
-        }
+    if (
+      this.audioElement &&
+      this.currentSong &&
+      isPlayableSong(this.currentSong)
+    ) {
+      this.audioElement.play().catch((err) => {
+        console.error('Resume playback error', err);
+        this.status = 'error';
+        this.listeners.onStatusChange?.('error', 'Failed to resume audio playback.');
       });
-    } else if (this.currentSong) {
+    } else if (this.currentSong && isPlayableSong(this.currentSong)) {
       this.playSong(this.currentSong);
     }
   }
 
   public seek(seconds: number) {
-    if (this.isUsingSynth) {
-      this.synthCurrentTime = seconds;
-      this.listeners.onTimeUpdate?.(this.synthCurrentTime, this.synthDuration);
-    } else if (this.audioElement && !isNaN(this.audioElement.duration)) {
-      this.audioElement.currentTime = Math.max(0, Math.min(seconds, this.audioElement.duration));
+    if (this.audioElement && !isNaN(this.audioElement.duration)) {
+      this.audioElement.currentTime = Math.max(
+        0,
+        Math.min(seconds, this.audioElement.duration)
+      );
     }
   }
 
@@ -230,92 +364,19 @@ class AudioEngineService {
   }
 
   public toggleInstrumentalMode(): boolean {
-    this.isInstrumentalMode = !this.isInstrumentalMode;
     if (this.vocalCutFilterNode && this.audioCtx) {
-      if (this.isInstrumentalMode) {
-        // High-pass filter above 180Hz and notch filter around 1kHz to cut vocal core
+      const isCurrentlyNotch = this.vocalCutFilterNode.type === 'notch';
+      if (!isCurrentlyNotch) {
         this.vocalCutFilterNode.type = 'notch';
         this.vocalCutFilterNode.frequency.setValueAtTime(1000, this.audioCtx.currentTime);
         this.vocalCutFilterNode.Q.setValueAtTime(3.0, this.audioCtx.currentTime);
+        return true;
       } else {
         this.vocalCutFilterNode.type = 'allpass';
+        return false;
       }
     }
-    return this.isInstrumentalMode;
-  }
-
-  // Realistic Procedural Synth Audio Generator (Web Audio API)
-  private startSynthPlayback(startTime = 0) {
-    this.stopSynthPlayback();
-    this.isUsingSynth = true;
-    this.status = 'playing';
-    this.synthCurrentTime = startTime;
-    this.synthDuration = this.currentSong?.duration || 180;
-    this.synthCurrentNoteIndex = 0;
-    this.listeners.onStatusChange?.('playing');
-
-    const notes = this.currentSong?.synthNotes || [440, 523, 659, 784, 880, 659, 523, 440];
-
-    // Trigger melodic notes every 400ms
-    this.synthInterval = window.setInterval(() => {
-      if (this.status !== 'playing' || !this.audioCtx) return;
-
-      const freq = notes[this.synthCurrentNoteIndex % notes.length];
-      this.synthCurrentNoteIndex++;
-
-      try {
-        const osc = this.audioCtx.createOscillator();
-        const noteGain = this.audioCtx.createGain();
-
-        osc.type = this.currentSong?.genre === 'Lo-Fi' ? 'sine' : this.currentSong?.genre === 'Rock' ? 'sawtooth' : 'triangle';
-        osc.frequency.setValueAtTime(freq, this.audioCtx.currentTime);
-
-        const now = this.audioCtx.currentTime;
-        noteGain.gain.setValueAtTime(0.001, now);
-        noteGain.gain.exponentialRampToValueAtTime(0.18 * this.volume, now + 0.05);
-        noteGain.gain.exponentialRampToValueAtTime(0.001, now + 0.38);
-
-        osc.connect(noteGain);
-        if (this.analyserNode) {
-          noteGain.connect(this.analyserNode);
-        } else {
-          noteGain.connect(this.audioCtx.destination);
-        }
-
-        osc.start(now);
-        osc.stop(now + 0.4);
-      } catch (err) {
-        console.warn('Synth note error', err);
-      }
-    }, 400);
-
-    // Track timer
-    this.synthFakeTimer = window.setInterval(() => {
-      if (this.status !== 'playing') return;
-      this.synthCurrentTime += 1;
-      this.listeners.onTimeUpdate?.(this.synthCurrentTime, this.synthDuration);
-
-      if (this.synthCurrentTime >= this.synthDuration) {
-        this.stopSynthPlayback();
-        this.listeners.onEnded?.();
-      }
-    }, 1000);
-  }
-
-  private pauseSynthPlayback() {
-    if (this.synthInterval) clearInterval(this.synthInterval);
-    if (this.synthFakeTimer) clearInterval(this.synthFakeTimer);
-    this.synthInterval = null;
-    this.synthFakeTimer = null;
-  }
-
-  private resumeSynthPlayback() {
-    this.startSynthPlayback(this.synthCurrentTime);
-  }
-
-  private stopSynthPlayback() {
-    this.pauseSynthPlayback();
-    this.isUsingSynth = false;
+    return false;
   }
 
   public getVisualizerData(): Uint8Array {
@@ -332,6 +393,17 @@ class AudioEngineService {
     return this.status;
   }
 
+  public reportAudioMissing(songId: string, reason?: string) {
+    this.status = 'error';
+    this.listeners.onStatusChange?.(
+      'error',
+      reason || 'Audio binary missing from local IndexedDB storage.'
+    );
+  }
+
+  /**
+   * Sound effect generator for interactive quiz challenges only.
+   */
   public playAudioSnippet(frequencies: number[]) {
     this.initAudioNodes();
     if (!this.audioCtx) return;

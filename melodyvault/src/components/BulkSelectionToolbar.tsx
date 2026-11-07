@@ -9,6 +9,7 @@ interface BulkSelectionToolbarProps {
   onSelectAllFiltered: () => void;
   onDeselectAll: () => void;
   onRequestDelete: () => void;
+  onCancel?: () => void;
 }
 
 export const BulkSelectionToolbar: React.FC<BulkSelectionToolbarProps> = ({
@@ -19,6 +20,7 @@ export const BulkSelectionToolbar: React.FC<BulkSelectionToolbarProps> = ({
   onSelectAllFiltered,
   onDeselectAll,
   onRequestDelete,
+  onCancel,
 }) => {
   if (selectedCount === 0) return null;
 
@@ -99,6 +101,17 @@ export const BulkSelectionToolbar: React.FC<BulkSelectionToolbarProps> = ({
             <Trash2 className="w-3.5 h-3.5" />
             <span>Delete ({selectedCount})</span>
           </button>
+
+          {/* Cancel Selection Mode CTA */}
+          {onCancel && (
+            <button
+              onClick={onCancel}
+              className="px-3 py-1.5 rounded-xl bg-[#202238] hover:bg-[#2b2d4b] border border-[#333658] text-slate-300 hover:text-white transition-colors cursor-pointer text-xs font-semibold ml-1"
+              title="Cancel and exit selection mode"
+            >
+              Cancel
+            </button>
+          )}
         </div>
       </div>
     </div>

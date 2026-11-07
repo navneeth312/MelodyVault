@@ -4,6 +4,7 @@ import { Sidebar } from './components/Sidebar';
 import { TopHeader } from './components/TopHeader';
 import { PlayerBar } from './components/PlayerBar';
 import { QueueDrawer } from './components/QueueDrawer';
+import { ExpandedPlayer } from './components/ExpandedPlayer';
 
 // Modals
 import { AddEditSongModal } from './components/modals/AddEditSongModal';
@@ -13,6 +14,8 @@ import { AttachMemoryModal } from './components/modals/AttachMemoryModal';
 import { ImportSongsModal } from './components/modals/ImportSongsModal';
 import { CollectionBackupModal } from './components/modals/CollectionBackupModal';
 import { SafeCleanupModal } from './components/modals/SafeCleanupModal';
+import { VocalSeparationModal } from './components/modals/VocalSeparationModal';
+import { OnboardingModal } from './components/modals/OnboardingModal';
 
 // Views
 import { DashboardView } from './views/DashboardView';
@@ -20,7 +23,9 @@ import { MusicLibraryView } from './views/MusicLibraryView';
 import { PlaylistsView } from './views/PlaylistsView';
 import { FavoritesView } from './views/FavoritesView';
 import { RecentlyPlayedView } from './views/RecentlyPlayedView';
+import { LeaderboardView } from './views/LeaderboardView';
 import { KaraokeView } from './views/KaraokeView';
+import { GamesHubView } from './views/GamesHubView';
 import { MusicChallengesView } from './views/MusicChallengesView';
 import { MusicQuestView } from './views/MusicQuestView';
 import { TimeCapsuleView } from './views/TimeCapsuleView';
@@ -32,11 +37,22 @@ import { ListeningStatisticsView } from './views/ListeningStatisticsView';
 import { SettingsView } from './views/SettingsView';
 
 import { Song, Playlist } from './types';
-import { CheckCircle2, AlertCircle, Info, X } from 'lucide-react';
+import {
+  CheckCircle2,
+  AlertCircle,
+  Info,
+  X,
+  Home,
+  Music2,
+  ListMusic,
+  Trophy,
+  Menu,
+} from 'lucide-react';
 
 const MainShell: React.FC = () => {
   const {
     activeTab,
+    setActiveTab,
     toast,
     hideToast,
     addSong,
@@ -53,7 +69,11 @@ const MainShell: React.FC = () => {
     setIsBackupModalOpen,
     isCleanupModalOpen,
     setIsCleanupModalOpen,
+    isOnboardingOpen,
+    completeOnboarding,
   } = useMusic();
+
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
   // Modals state
   const [isAddSongModalOpen, setIsAddSongModalOpen] = useState(false);
@@ -148,6 +168,10 @@ const MainShell: React.FC = () => {
         return <FavoritesView onOpenAddToPlaylist={handleOpenAddToPlaylist} />;
       case 'recently_played':
         return <RecentlyPlayedView onOpenAddToPlaylist={handleOpenAddToPlaylist} />;
+      case 'leaderboard':
+        return <LeaderboardView />;
+      case 'games':
+        return <GamesHubView />;
       case 'karaoke':
         return <KaraokeView />;
       case 'challenges':
@@ -180,8 +204,11 @@ const MainShell: React.FC = () => {
 
   return (
     <div className="flex h-screen w-screen overflow-hidden bg-[#0c0d14] text-slate-100 font-sans select-none">
-      {/* Fixed Left Sidebar */}
-      <Sidebar />
+      {/* Desktop Sidebar & Mobile Slide-over Drawer */}
+      <Sidebar
+        isOpenOnMobile={isMobileMenuOpen}
+        onCloseMobile={() => setIsMobileMenuOpen(false)}
+      />
 
       {/* Main View Area */}
       <div className="flex-1 flex flex-col min-w-0 h-full overflow-hidden relative">
@@ -189,18 +216,80 @@ const MainShell: React.FC = () => {
         <TopHeader
           onOpenAddSong={handleOpenAddSong}
           onOpenCreatePlaylistModal={handleOpenCreatePlaylist}
+          onToggleMobileMenu={() => setIsMobileMenuOpen((prev) => !prev)}
         />
 
-        {/* Scrollable View Container */}
-        <main className="flex-1 overflow-y-auto scrollbar-thin">
+        {/* Scrollable View Container (with bottom clearance for mobile mini-player + nav) */}
+        <main className="flex-1 overflow-y-auto scrollbar-thin pb-28 md:pb-6">
           {renderActiveView()}
         </main>
 
-        {/* Persistent Bottom Player */}
+        {/* Persistent Bottom Player (Desktop Bar + Mobile Mini-Player) */}
         <PlayerBar />
+
+        {/* Mobile Bottom Navigation Bar (Hidden on desktop md:) */}
+        <nav className="h-14 bg-[#0e0f17]/95 backdrop-blur-md border-t border-[#1e202e] grid grid-cols-5 items-center px-1 md:hidden shrink-0 z-40 select-none">
+          <button
+            onClick={() => setActiveTab('dashboard')}
+            className={`flex flex-col items-center justify-center h-full min-h-[44px] transition-colors cursor-pointer ${
+              activeTab === 'dashboard' ? 'text-purple-400 font-bold' : 'text-slate-400 hover:text-slate-200'
+            }`}
+            aria-label="Dashboard"
+          >
+            <Home className="w-4 h-4" />
+            <span className="text-[10px] mt-0.5">Home</span>
+          </button>
+
+          <button
+            onClick={() => setActiveTab('library')}
+            className={`flex flex-col items-center justify-center h-full min-h-[44px] transition-colors cursor-pointer ${
+              activeTab === 'library' ? 'text-purple-400 font-bold' : 'text-slate-400 hover:text-slate-200'
+            }`}
+            aria-label="Music Library"
+          >
+            <Music2 className="w-4 h-4" />
+            <span className="text-[10px] mt-0.5">Library</span>
+          </button>
+
+          <button
+            onClick={() => setActiveTab('playlists')}
+            className={`flex flex-col items-center justify-center h-full min-h-[44px] transition-colors cursor-pointer ${
+              activeTab === 'playlists' ? 'text-purple-400 font-bold' : 'text-slate-400 hover:text-slate-200'
+            }`}
+            aria-label="Playlists"
+          >
+            <ListMusic className="w-4 h-4" />
+            <span className="text-[10px] mt-0.5">Playlists</span>
+          </button>
+
+          <button
+            onClick={() => setActiveTab('quest')}
+            className={`flex flex-col items-center justify-center h-full min-h-[44px] transition-colors cursor-pointer ${
+              activeTab === 'quest' ? 'text-purple-400 font-bold' : 'text-slate-400 hover:text-slate-200'
+            }`}
+            aria-label="Music Quests"
+          >
+            <Trophy className="w-4 h-4" />
+            <span className="text-[10px] mt-0.5">Quests</span>
+          </button>
+
+          <button
+            onClick={() => setIsMobileMenuOpen(true)}
+            className={`flex flex-col items-center justify-center h-full min-h-[44px] transition-colors cursor-pointer ${
+              isMobileMenuOpen ? 'text-purple-400 font-bold' : 'text-slate-400 hover:text-slate-200'
+            }`}
+            aria-label="Open More Menu"
+          >
+            <Menu className="w-4 h-4" />
+            <span className="text-[10px] mt-0.5">More</span>
+          </button>
+        </nav>
 
         {/* Up Next Queue Drawer */}
         <QueueDrawer />
+
+        {/* Polished Spotify-Style Expanded Player */}
+        <ExpandedPlayer />
 
         {/* Global Toast Alert */}
         {toast && (
@@ -270,6 +359,13 @@ const MainShell: React.FC = () => {
         <SafeCleanupModal
           isOpen={isCleanupModalOpen}
           onClose={() => setIsCleanupModalOpen(false)}
+        />
+
+        <VocalSeparationModal />
+
+        <OnboardingModal
+          isOpen={isOnboardingOpen}
+          onComplete={completeOnboarding}
         />
       </div>
     </div>

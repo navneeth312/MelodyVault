@@ -1,8 +1,9 @@
 import React from 'react';
 import { Heart, Play, Shuffle, Plus, Clock, ListPlus } from 'lucide-react';
 import { useMusic } from '../context/MusicContext';
-import { formatDuration } from '../utils/pureLogic';
+import { formatDuration, isPlayableSong } from '../utils/pureLogic';
 import { Song } from '../types';
+import { SongArtwork } from '../components/common/SongArtwork';
 
 interface FavoritesViewProps {
   onOpenAddToPlaylist: (song: Song) => void;
@@ -11,13 +12,15 @@ interface FavoritesViewProps {
 export const FavoritesView: React.FC<FavoritesViewProps> = ({ onOpenAddToPlaylist }) => {
   const { favorites, playSong, toggleFavorite, addToQueue } = useMusic();
 
+  const playableFavorites = favorites.filter(isPlayableSong);
+
   const handlePlayAll = (shuffle = false) => {
-    if (favorites.length === 0) return;
+    if (playableFavorites.length === 0) return;
     if (shuffle) {
-      const shuffled = [...favorites].sort(() => Math.random() - 0.5);
+      const shuffled = [...playableFavorites].sort(() => Math.random() - 0.5);
       playSong(shuffled[0], shuffled.slice(1));
     } else {
-      playSong(favorites[0], favorites.slice(1));
+      playSong(playableFavorites[0], playableFavorites.slice(1));
     }
   };
 
@@ -47,16 +50,18 @@ export const FavoritesView: React.FC<FavoritesViewProps> = ({ onOpenAddToPlaylis
         <div className="flex items-center gap-3">
           <button
             onClick={() => handlePlayAll(false)}
-            disabled={favorites.length === 0}
+            disabled={playableFavorites.length === 0}
             className="flex items-center gap-2 px-5 py-2.5 bg-gradient-to-r from-rose-600 to-purple-600 hover:from-rose-500 hover:to-purple-500 disabled:opacity-40 text-white rounded-xl text-xs font-bold shadow-lg shadow-rose-900/40 hover:scale-102 transition-all"
+            title={playableFavorites.length === 0 ? 'No playable imported tracks in Favourites' : 'Play All'}
           >
             <Play className="w-4 h-4 fill-white" />
             <span>Play All</span>
           </button>
           <button
             onClick={() => handlePlayAll(true)}
-            disabled={favorites.length === 0}
+            disabled={playableFavorites.length === 0}
             className="flex items-center gap-2 px-4 py-2.5 bg-[#1b1c2e] hover:bg-[#252740] disabled:opacity-40 text-slate-200 rounded-xl text-xs font-semibold transition-colors border border-[#2d304a]"
+            title={playableFavorites.length === 0 ? 'No playable imported tracks in Favourites' : 'Shuffle'}
           >
             <Shuffle className="w-4 h-4 text-rose-400" />
             <span>Shuffle</span>
@@ -92,7 +97,12 @@ export const FavoritesView: React.FC<FavoritesViewProps> = ({ onOpenAddToPlaylis
                   <td className="py-3 px-4 text-center">
                     <button
                       onClick={() => playSong(song, favorites.slice(idx + 1))}
-                      className="w-7 h-7 rounded-full flex items-center justify-center text-slate-400 group-hover:text-white group-hover:bg-rose-600 transition-all mx-auto"
+                      className={`w-7 h-7 rounded-full flex items-center justify-center transition-all mx-auto ${
+                        isPlayableSong(song)
+                          ? 'text-slate-400 group-hover:text-white group-hover:bg-rose-600'
+                          : 'text-slate-600 opacity-50'
+                      }`}
+                      title={isPlayableSong(song) ? `Play ${song.title}` : `Cannot play: Manual catalogue entry (No local audio)`}
                     >
                       <Play className="w-3 h-3 translate-x-0.2" />
                     </button>
@@ -100,7 +110,7 @@ export const FavoritesView: React.FC<FavoritesViewProps> = ({ onOpenAddToPlaylis
 
                   <td className="py-3 px-4">
                     <div className="flex items-center gap-3">
-                      <img
+                      <SongArtwork
                         src={song.artwork}
                         alt={song.title}
                         className="w-10 h-10 rounded-lg object-cover shrink-0"

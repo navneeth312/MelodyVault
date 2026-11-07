@@ -2,7 +2,8 @@ import React, { useState } from 'react';
 import { Sparkles, Play, Shuffle, Heart, Radio, Music } from 'lucide-react';
 import { useMusic } from '../context/MusicContext';
 import { Song, SongMood } from '../types';
-import { formatDuration } from '../utils/pureLogic';
+import { formatDuration, isPlayableSong } from '../utils/pureLogic';
+import { SongArtwork } from '../components/common/SongArtwork';
 
 interface MoodCard {
   mood: SongMood;
@@ -73,19 +74,23 @@ const MOOD_COLLECTIONS: MoodCard[] = [
 ];
 
 export const MoodExplorerView: React.FC = () => {
-  const { songs, playSong, toggleFavorite } = useMusic();
+  const { songs, playSong, toggleFavorite, showToast } = useMusic();
   const [selectedMood, setSelectedMood] = useState<SongMood>('Midnight Drive');
 
   const activeMoodInfo = MOOD_COLLECTIONS.find((m) => m.mood === selectedMood) || MOOD_COLLECTIONS[0];
   const matchingSongs = songs.filter((s) => s.mood === selectedMood);
+  const playableMatchingSongs = matchingSongs.filter(isPlayableSong);
 
   const handlePlayMoodRadio = (shuffle = false) => {
-    if (matchingSongs.length === 0) return;
+    if (playableMatchingSongs.length === 0) {
+      showToast(`No playable imported tracks found for "${selectedMood}". Import MP3 or WAV files to listen.`, 'info');
+      return;
+    }
     if (shuffle) {
-      const shuffled = [...matchingSongs].sort(() => Math.random() - 0.5);
+      const shuffled = [...playableMatchingSongs].sort(() => Math.random() - 0.5);
       playSong(shuffled[0], shuffled.slice(1));
     } else {
-      playSong(matchingSongs[0], matchingSongs.slice(1));
+      playSong(playableMatchingSongs[0], playableMatchingSongs.slice(1));
     }
   };
 
@@ -114,8 +119,9 @@ export const MoodExplorerView: React.FC = () => {
         <div className="flex items-center gap-3">
           <button
             onClick={() => handlePlayMoodRadio(false)}
-            disabled={matchingSongs.length === 0}
+            disabled={playableMatchingSongs.length === 0}
             className="flex items-center gap-2 px-5 py-2.5 bg-gradient-to-r from-purple-600 to-violet-600 hover:from-purple-500 hover:to-violet-500 text-white rounded-xl text-xs font-bold shadow-lg shadow-purple-950/50 hover:scale-102 transition-all disabled:opacity-40"
+            title={playableMatchingSongs.length === 0 ? 'No playable imported tracks for this mood' : `Play ${activeMoodInfo.title}`}
           >
             <Play className="w-4 h-4 fill-white" />
             <span>Play {activeMoodInfo.title}</span>
@@ -188,7 +194,7 @@ export const MoodExplorerView: React.FC = () => {
               >
                 <div className="flex items-center gap-3 min-w-0">
                   <div className="relative group/cover shrink-0">
-                    <img
+                    <SongArtwork
                       src={song.artwork}
                       alt={song.title}
                       className="w-12 h-12 rounded-xl object-cover shadow"

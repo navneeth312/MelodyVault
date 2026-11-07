@@ -466,10 +466,15 @@ export async function importCollectionZip(
   let finalSongs: Song[] = [];
   let finalPlaylists: Playlist[] = [];
 
-  const incomingSongs = backupData.songs.map((s) => ({
-    ...s,
-    source: (s.isLocalImport ? 'user_import' : 'user_manual') as any,
-  }));
+  const incomingSongs = backupData.songs.map((s) => {
+    const isLocal = Boolean(s.isLocalImport || s.audioAvailability === 'local_file');
+    return {
+      ...s,
+      source: (isLocal ? 'user_import' : (s.source || 'user_manual')) as any,
+      isLocalImport: isLocal,
+      audioAvailability: (isLocal ? 'local_file' : 'metadata_only') as any,
+    };
+  });
 
   if (duplicateStrategy === 'replace') {
     finalSongs = incomingSongs;

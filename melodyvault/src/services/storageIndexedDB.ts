@@ -1,7 +1,8 @@
 const DB_NAME = 'MelodyVaultDB';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 const AUDIO_STORE = 'audio_files';
 const ARTWORK_STORE = 'custom_artwork';
+const SEPARATED_STORE = 'separated_audio';
 
 export interface StoredAudioRecord {
   songId: string;
@@ -18,8 +19,18 @@ export interface StoredArtworkRecord {
   mimeType: string;
 }
 
+export interface StoredSeparatedAudioRecord {
+  songId: string;
+  instrumentalBlob: Blob;
+  vocalBlob?: Blob;
+  modelUsed: string; // e.g. 'htdemucs_v4', 'spleeter_2stem', 'studio_backing_track'
+  processedAt: string;
+  size: number;
+}
+
 let dbInstance: IDBDatabase | null = null;
 const objectUrlCache = new Map<string, string>();
+const instrumentalUrlCache = new Map<string, string>();
 
 export async function getDB(): Promise<IDBDatabase> {
   if (dbInstance) return dbInstance;
@@ -34,6 +45,9 @@ export async function getDB(): Promise<IDBDatabase> {
       }
       if (!db.objectStoreNames.contains(ARTWORK_STORE)) {
         db.createObjectStore(ARTWORK_STORE, { keyPath: 'songId' });
+      }
+      if (!db.objectStoreNames.contains(SEPARATED_STORE)) {
+        db.createObjectStore(SEPARATED_STORE, { keyPath: 'songId' });
       }
     };
 
@@ -74,6 +88,24 @@ export async function saveAudioBlob(
   });
 }
 
+export async function hasAudioBlob(songId: string): Promise<boolean> {
+  const blob = await getAudioBlob(songId);
+  return blob !== null && blob.size > 0;
+}
+
+const artworkUrlCache = new Map<string, string>();
+
+export async function getArtworkObjectURL(songId: string): Promise<string | null> {
+  if (artworkUrlCache.has(songId)) {
+    return artworkUrlCache.get(songId)!;
+  }
+  const blob = await getArtworkBlob(songId);
+  if (!blob) return null;
+  const url = URL.createObjectURL(blob);
+  artworkUrlCache.set(songId, url);
+  return url;
+}
+
 export async function getAudioBlob(songId: string): Promise<Blob | null> {
   const db = await getDB();
   return new Promise((resolve, reject) => {
@@ -94,15 +126,83 @@ export async function deleteAudioBlob(songId: string): Promise<void> {
     URL.revokeObjectURL(objectUrlCache.get(songId)!);
     objectUrlCache.delete(songId);
   }
+  if (instrumentalUrlCache.has(songId)) {
+    URL.revokeObjectURL(instrumentalUrlCache.get(songId)!);
+    instrumentalUrlCache.delete(songId);
+  }
 
   const db = await getDB();
   return new Promise((resolve, reject) => {
-    const tx = db.transaction([AUDIO_STORE, ARTWORK_STORE], 'readwrite');
+    const tx = db.transaction([AUDIO_STORE, ARTWORK_STORE, SEPARATED_STORE], 'readwrite');
     tx.objectStore(AUDIO_STORE).delete(songId);
     tx.objectStore(ARTWORK_STORE).delete(songId);
+    tx.objectStore(SEPARATED_STORE).delete(songId);
 
     tx.oncomplete = () => resolve();
     tx.onerror = () => reject(tx.error);
+  });
+}
+
+export async function saveSeparatedAudioRecord(record: StoredSeparatedAudioRecord): Promise<void> {
+  const db = await getDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(SEPARATED_STORE, 'readwrite');
+    const store = tx.objectStore(SEPARATED_STORE);
+    const req = store.put(record);
+    req.onsuccess = () => {
+      // Invalidate existing cache if re-saving
+      if (instrumentalUrlCache.has(record.songId)) {
+        URL.revokeObjectURL(instrumentalUrlCache.get(record.songId)!);
+        instrumentalUrlCache.delete(record.songId);
+      }
+      resolve();
+    };
+    req.onerror = () => reject(req.error);
+  });
+}
+
+export async function getSeparatedAudioRecord(songId: string): Promise<StoredSeparatedAudioRecord | null> {
+  const db = await getDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(SEPARATED_STORE, 'readonly');
+    const store = tx.objectStore(SEPARATED_STORE);
+    const req = store.get(songId);
+    req.onsuccess = () => resolve(req.result || null);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+export async function hasSeparatedAudio(songId: string): Promise<boolean> {
+  const record = await getSeparatedAudioRecord(songId);
+  return record !== null && record.instrumentalBlob !== undefined && record.instrumentalBlob.size > 0;
+}
+
+export async function getInstrumentalObjectURL(songId: string): Promise<string | null> {
+  if (instrumentalUrlCache.has(songId)) {
+    return instrumentalUrlCache.get(songId)!;
+  }
+
+  const record = await getSeparatedAudioRecord(songId);
+  if (!record || !record.instrumentalBlob) return null;
+
+  const url = URL.createObjectURL(record.instrumentalBlob);
+  instrumentalUrlCache.set(songId, url);
+  return url;
+}
+
+export async function deleteSeparatedAudioRecord(songId: string): Promise<void> {
+  if (instrumentalUrlCache.has(songId)) {
+    URL.revokeObjectURL(instrumentalUrlCache.get(songId)!);
+    instrumentalUrlCache.delete(songId);
+  }
+
+  const db = await getDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(SEPARATED_STORE, 'readwrite');
+    const store = tx.objectStore(SEPARATED_STORE);
+    const req = store.delete(songId);
+    req.onsuccess = () => resolve();
+    req.onerror = () => reject(req.error);
   });
 }
 

@@ -16,8 +16,9 @@ import {
   Share2,
 } from 'lucide-react';
 import { useMusic } from '../context/MusicContext';
-import { calculatePlaylistStats, formatDuration } from '../utils/pureLogic';
+import { calculatePlaylistStats, formatDuration, isPlayableSong } from '../utils/pureLogic';
 import { Playlist, Song } from '../types';
+import { SongArtwork } from '../components/common/SongArtwork';
 
 interface PlaylistsViewProps {
   onOpenCreatePlaylist: () => void;
@@ -61,13 +62,18 @@ export const PlaylistsView: React.FC<PlaylistsViewProps> = ({
     return calculatePlaylistStats(songs, activePlaylist.songIds);
   }, [activePlaylist, songs]);
 
+  const playablePlaylistSongs = useMemo(
+    () => activePlaylistSongs.filter(isPlayableSong),
+    [activePlaylistSongs]
+  );
+
   const handlePlayAll = (shuffle = false) => {
-    if (activePlaylistSongs.length === 0) return;
+    if (playablePlaylistSongs.length === 0) return;
     if (shuffle) {
-      const shuffled = [...activePlaylistSongs].sort(() => Math.random() - 0.5);
+      const shuffled = [...playablePlaylistSongs].sort(() => Math.random() - 0.5);
       playSong(shuffled[0], shuffled.slice(1));
     } else {
-      playSong(activePlaylistSongs[0], activePlaylistSongs.slice(1));
+      playSong(playablePlaylistSongs[0], playablePlaylistSongs.slice(1));
     }
   };
 
@@ -130,8 +136,9 @@ export const PlaylistsView: React.FC<PlaylistsViewProps> = ({
             <div className="pt-2 flex flex-wrap items-center gap-3">
               <button
                 onClick={() => handlePlayAll(false)}
-                disabled={activePlaylistSongs.length === 0}
+                disabled={playablePlaylistSongs.length === 0}
                 className="flex items-center gap-2 px-5 py-2.5 bg-gradient-to-r from-purple-600 to-violet-600 hover:from-purple-500 hover:to-violet-500 disabled:opacity-40 text-white rounded-xl text-xs font-bold shadow-lg shadow-purple-900/40 hover:scale-102 transition-all"
+                title={playablePlaylistSongs.length === 0 ? 'No playable imported tracks in playlist' : 'Play Playlist'}
               >
                 <Play className="w-4 h-4 fill-white" />
                 <span>Play Playlist</span>
@@ -139,8 +146,9 @@ export const PlaylistsView: React.FC<PlaylistsViewProps> = ({
 
               <button
                 onClick={() => handlePlayAll(true)}
-                disabled={activePlaylistSongs.length === 0}
+                disabled={playablePlaylistSongs.length === 0}
                 className="flex items-center gap-2 px-4 py-2.5 bg-[#1b1c2e] hover:bg-[#252740] disabled:opacity-40 text-slate-200 rounded-xl text-xs font-semibold transition-colors border border-[#2d304a]"
+                title={playablePlaylistSongs.length === 0 ? 'No playable imported tracks in playlist' : 'Shuffle'}
               >
                 <Shuffle className="w-4 h-4 text-purple-400" />
                 <span>Shuffle</span>
@@ -200,7 +208,12 @@ export const PlaylistsView: React.FC<PlaylistsViewProps> = ({
                       <td className="py-3 px-4 text-center">
                         <button
                           onClick={() => playSong(song, activePlaylistSongs.slice(idx + 1))}
-                          className="w-7 h-7 rounded-full flex items-center justify-center text-slate-400 group-hover:text-white group-hover:bg-purple-600 transition-all mx-auto"
+                          className={`w-7 h-7 rounded-full flex items-center justify-center transition-all mx-auto ${
+                            isPlayableSong(song)
+                              ? 'text-slate-400 group-hover:text-white group-hover:bg-purple-600'
+                              : 'text-slate-600 opacity-50'
+                          }`}
+                          title={isPlayableSong(song) ? `Play ${song.title}` : `Cannot play: Manual catalogue entry (No local audio)`}
                         >
                           <Play className="w-3 h-3 translate-x-0.2" />
                         </button>
@@ -208,7 +221,7 @@ export const PlaylistsView: React.FC<PlaylistsViewProps> = ({
 
                       <td className="py-3 px-4">
                         <div className="flex items-center gap-3">
-                          <img
+                          <SongArtwork
                             src={song.artwork}
                             alt={song.title}
                             className="w-9 h-9 rounded object-cover shrink-0"

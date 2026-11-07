@@ -10,6 +10,7 @@ import {
   Award,
 } from 'lucide-react';
 import { useMusic } from '../context/MusicContext';
+import { SongArtwork } from '../components/common/SongArtwork';
 
 export const ListeningStatisticsView: React.FC = () => {
   const { songs, playlists, memories, xp } = useMusic();
@@ -232,7 +233,7 @@ export const ListeningStatisticsView: React.FC = () => {
                   <span className="text-xs font-mono font-bold text-slate-500 w-4 text-center">
                     #{idx + 1}
                   </span>
-                  <img
+                  <SongArtwork
                     src={artist.artwork}
                     alt={artist.artist}
                     className="w-10 h-10 rounded-full object-cover shrink-0"

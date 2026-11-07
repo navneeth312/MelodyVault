@@ -102,6 +102,7 @@ export const AddEditSongModal: React.FC<AddEditSongModalProps> = ({
     }
 
     const payload = {
+      ...initialSong,
       title: title.trim(),
       artist: artist.trim(),
       album: album.trim() || 'MelodyVault Single',
@@ -111,7 +112,9 @@ export const AddEditSongModal: React.FC<AddEditSongModalProps> = ({
       year: parseInt(year, 10) || new Date().getFullYear(),
       artwork: artwork.trim() || 'https://images.unsplash.com/photo-1518709268805-4e9042af9f23?w=500&auto=format&fit=crop&q=80',
       audioUrl: audioUrl.trim() || null,
-      audioAvailability,
+      audioAvailability: initialSong?.isLocalImport ? ('local_file' as const) : ('metadata_only' as const),
+      source: initialSong?.isLocalImport ? ('user_import' as const) : ('user_manual' as const),
+      isLocalImport: Boolean(initialSong?.isLocalImport),
       mood,
       lyrics: initialSong?.lyrics || [
         { time: 0, text: `[${genre} Instrumental Intro]` },
@@ -284,34 +287,23 @@ export const AddEditSongModal: React.FC<AddEditSongModalProps> = ({
             />
           </div>
 
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block text-[11px] font-medium text-slate-300 mb-1">
-                Audio Stream Mode
-              </label>
-              <select
-                value={audioAvailability}
-                onChange={(e) => setAudioAvailability(e.target.value as AudioAvailability)}
-                className="w-full px-2.5 py-2 bg-[#18192a] border border-[#2b2d45] rounded-lg text-xs text-white focus:outline-none"
-              >
-                <option value="preview">Synth Melodic Preview</option>
-                <option value="stream">Audio URL Stream</option>
-                <option value="metadata_only">Metadata Only (Licensed)</option>
-              </select>
+          {initialSong?.isLocalImport ? (
+            <div className="p-3 bg-cyan-950/20 border border-cyan-500/30 rounded-lg text-xs text-cyan-300">
+              <div className="font-semibold flex items-center gap-1.5">
+                <span>Locally Stored Audio File</span>
+              </div>
+              <div className="text-[11px] text-slate-400 mt-0.5">
+                Audio binary is saved securely in browser IndexedDB: {initialSong.fileName || 'Local file'}
+              </div>
             </div>
-            <div>
-              <label className="block text-[11px] font-medium text-slate-300 mb-1">
-                Audio MP3 URL (Optional)
-              </label>
-              <input
-                type="url"
-                value={audioUrl}
-                onChange={(e) => setAudioUrl(e.target.value)}
-                placeholder="https://...mp3"
-                className="w-full px-3 py-2 bg-[#18192a] border border-[#2b2d45] rounded-lg text-xs text-white placeholder-slate-500 focus:outline-none"
-              />
+          ) : (
+            <div className="p-3 bg-amber-950/20 border border-amber-500/30 rounded-lg text-xs text-amber-300">
+              <div className="font-semibold">Catalogue Record (Metadata Only)</div>
+              <div className="text-[11px] text-slate-400 mt-0.5">
+                Manual catalogue entries do not store audio. To play audio, use the "Import Songs" button to upload MP3 or WAV files.
+              </div>
             </div>
-          </div>
+          )}
 
           {/* Modal Footer */}
           <div className="pt-4 border-t border-[#23253b] flex items-center justify-end gap-2">

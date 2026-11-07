@@ -1,17 +1,20 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Search, Sparkles, Plus, Play, Music, X } from 'lucide-react';
+import { Search, Sparkles, Plus, Play, Music, X, Menu, Server, CheckCircle2, RefreshCw } from 'lucide-react';
 import { useMusic } from '../context/MusicContext';
-import { calculateLevelFromXP } from '../utils/pureLogic';
+import { calculateLevelFromXP, isPlayableSong } from '../utils/pureLogic';
 import { Song } from '../types';
+import { SongArtwork } from './common/SongArtwork';
 
 interface TopHeaderProps {
   onOpenAddSong?: () => void;
   onOpenCreatePlaylistModal?: () => void;
+  onToggleMobileMenu?: () => void;
 }
 
 export const TopHeader: React.FC<TopHeaderProps> = ({
   onOpenAddSong,
   onOpenCreatePlaylistModal,
+  onToggleMobileMenu,
 }) => {
   const {
     activeTab,
@@ -22,6 +25,9 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
     xp,
     streakDays,
     setActiveTab,
+    backendStatus,
+    vaultSyncState,
+    userProfile,
   } = useMusic();
 
   const [isSearchFocused, setIsSearchFocused] = useState(false);
@@ -60,6 +66,7 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
     playlists: 'Playlists Collection',
     favorites: 'Favourites',
     recently_played: 'Recently Played Tracks',
+    leaderboard: 'Shared Global Leaderboard',
     karaoke: 'Karaoke & Timed Lyrics',
     challenges: 'Music Challenges & Games',
     quest: 'Music Quest & Achievements',
@@ -79,14 +86,23 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
   };
 
   return (
-    <header className="h-16 px-6 bg-[#0e0f17]/90 backdrop-blur-md border-b border-[#1e202e] flex items-center justify-between gap-6 shrink-0 z-30">
-      {/* Title & Breadcrumb */}
+    <header className="h-16 px-4 md:px-6 bg-[#0e0f17]/90 backdrop-blur-md border-b border-[#1e202e] flex items-center justify-between gap-4 md:gap-6 shrink-0 z-30">
+      {/* Title & Mobile Hamburger */}
       <div className="flex items-center gap-3 min-w-0">
+        {onToggleMobileMenu && (
+          <button
+            onClick={onToggleMobileMenu}
+            className="p-2 -ml-1 rounded-xl text-slate-400 hover:text-white md:hidden cursor-pointer hover:bg-white/5 transition-colors"
+            aria-label="Toggle navigation menu"
+          >
+            <Menu className="w-5 h-5" />
+          </button>
+        )}
         <div>
-          <h1 className="text-base font-bold text-white tracking-tight truncate">
+          <h1 className="text-sm md:text-base font-bold text-white tracking-tight truncate">
             {tabTitles[activeTab] || 'MelodyVault'}
           </h1>
-          <p className="text-[11px] text-slate-400 truncate">
+          <p className="text-[10px] md:text-[11px] text-slate-400 truncate">
             Music Playlist and Personal Collection Management System
           </p>
         </div>
@@ -133,7 +149,7 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
                     className="w-full flex items-center justify-between p-2 rounded-lg hover:bg-purple-600/15 group transition-colors text-left"
                   >
                     <div className="flex items-center gap-2.5 min-w-0">
-                      <img
+                      <SongArtwork
                         src={song.artwork}
                         alt={song.title}
                         className="w-8 h-8 rounded object-cover shrink-0"
@@ -147,7 +163,18 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
                         </div>
                       </div>
                     </div>
-                    <Play className="w-4 h-4 text-slate-400 group-hover:text-purple-400 shrink-0 ml-2" />
+                    <div className="flex items-center gap-1.5 shrink-0 ml-2">
+                      {isPlayableSong(song) ? (
+                        <span className="text-[9px] font-mono px-1 py-0.5 rounded bg-cyan-500/15 text-cyan-300 border border-cyan-500/30 font-bold">
+                          LOCAL
+                        </span>
+                      ) : (
+                        <span className="text-[9px] font-mono px-1 py-0.5 rounded bg-amber-500/10 text-amber-400 border border-amber-500/20">
+                          CATALOG
+                        </span>
+                      )}
+                      <Play className={`w-4 h-4 ${isPlayableSong(song) ? 'text-slate-400 group-hover:text-purple-400' : 'text-slate-600'}`} />
+                    </div>
                   </button>
                 ))}
               </div>
@@ -157,7 +184,46 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
       </div>
 
       {/* Right Action Cluster */}
-      <div className="flex items-center gap-3 shrink-0">
+      <div className="flex items-center gap-2.5 shrink-0">
+        {/* Automatic Personal Vault Sync Status Badge */}
+        {vaultSyncState.status === 'scanning' && (
+          <div
+            className="hidden lg:flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-purple-500/15 border border-purple-500/30 text-[10px] text-purple-300 font-mono shadow-sm"
+            title={`Scanning C:\\MelodyVault Sample Music (${vaultSyncState.trackCount > 0 ? `${vaultSyncState.trackCount} tracks` : 'folder'})...`}
+          >
+            <RefreshCw className="w-3 h-3 text-purple-400 animate-spin" />
+            <span className="font-semibold">Scanning Vault...</span>
+          </div>
+        )}
+        {vaultSyncState.status === 'synced' && (
+          <div
+            className="hidden lg:flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/25 text-[10px] text-emerald-300 font-mono shadow-sm"
+            title={`Personal Vault: ${vaultSyncState.trackCount} local tracks synchronized`}
+          >
+            <CheckCircle2 className="w-3 h-3 text-emerald-400" />
+            <span className="font-semibold">{vaultSyncState.trackCount} Tracks Synced</span>
+          </div>
+        )}
+
+        {/* Java 25 & Spring Boot Backend Status Badge */}
+        {backendStatus.isOnline ? (
+          <div
+            className="hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-emerald-500/15 border border-emerald-500/30 text-[10px] text-emerald-300 font-mono shadow-sm"
+            title="Java 25 & Spring Boot 3.4.2 REST API Online at localhost:8085"
+          >
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+            <span className="font-semibold">Java API :8085</span>
+          </div>
+        ) : (
+          <div
+            className="hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-slate-800/60 border border-slate-700/50 text-[10px] text-slate-400 font-mono"
+            title="Java API offline (Prototype operating in standalone browser mode)"
+          >
+            <span className="w-1.5 h-1.5 rounded-full bg-slate-500" />
+            <span>Local Mode</span>
+          </div>
+        )}
+
         {/* Quick Action Button */}
         {onOpenAddSong && (
           <button
@@ -172,13 +238,29 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
         {/* Quest Status Pill */}
         <button
           onClick={() => setActiveTab('quest')}
-          className="flex items-center gap-2 px-2.5 py-1.5 bg-[#171826] hover:bg-[#1e2033] border border-[#27293d] rounded-lg text-xs transition-colors shrink-0"
+          className="flex items-center gap-2 px-2.5 py-1.5 bg-[#171826] hover:bg-[#1e2033] border border-[#27293d] rounded-lg text-xs transition-colors shrink-0 cursor-pointer"
           title="View Music Quest & Badges"
         >
           <Sparkles className="w-3.5 h-3.5 text-amber-400" />
           <span className="font-semibold text-slate-200 tabular-nums font-mono">{xp} XP</span>
           <span className="text-[10px] text-purple-400 font-medium hidden sm:inline">
             Lv.{levelInfo.level}
+          </span>
+        </button>
+
+        {/* User Profile Quick Pill */}
+        <button
+          onClick={() => setActiveTab('settings')}
+          className="flex items-center gap-2 pl-1 pr-2.5 py-1 bg-[#171826] hover:bg-[#1e2033] border border-[#27293d] rounded-full text-xs transition-colors shrink-0 group cursor-pointer"
+          title={`${userProfile.name} • ${userProfile.tag || 'Curator'} • Click to view settings`}
+        >
+          <img
+            src={userProfile.avatar || '/avatars/navneeth_u.jpg'}
+            alt={userProfile.name}
+            className="w-6 h-6 rounded-full object-cover ring-1 ring-purple-500/40 shrink-0"
+          />
+          <span className="text-xs font-semibold text-slate-200 group-hover:text-purple-300 max-w-[85px] truncate hidden md:inline">
+            {userProfile.name}
           </span>
         </button>
       </div>

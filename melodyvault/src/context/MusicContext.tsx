@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect, useCallback, useMemo } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import {
   Song,
   Playlist,
@@ -9,19 +9,33 @@ import {
   LeaderboardUser,
   NavigationTab,
   ImportFileProgress,
+  UserProfile,
 } from '../types';
-import { INITIAL_SONGS } from '../data/sampleSongs';
 import {
-  INITIAL_PLAYLISTS,
-  INITIAL_TIME_CAPSULES,
-  INITIAL_MEMORIES,
-  INITIAL_BUCKET_LIST,
   INITIAL_BADGES,
-  DEMO_LEADERBOARD,
+  CURRENT_USER_PROFILE,
+  PUBLIC_CATALOGUE_FALLBACK_TRACKS,
 } from '../data/sampleData';
+import { apiService } from '../services/apiService';
+import { questService, DynamicQuest, QuestHistoryRecord } from '../services/questService';
+import { xpService } from '../services/xpService';
 import { audioEngine, PlayerStatus } from '../services/audioEngine';
-import { calculateLevelFromXP, reorderArray } from '../utils/pureLogic';
-import { saveAudioBlob, deleteAudioBlob, saveArtworkBlob, getStorageStats } from '../services/storageIndexedDB';
+import {
+  calculateLevelFromXP,
+  reorderArray,
+  isPlayableSong,
+  validateSongPlayability,
+  getNextPlayableTrack,
+  getPreviousPlayableTrack,
+} from '../utils/pureLogic';
+import {
+  saveAudioBlob,
+  deleteAudioBlob,
+  saveArtworkBlob,
+  getStorageStats,
+  getAudioBlob,
+  hasSeparatedAudio,
+} from '../services/storageIndexedDB';
 import { extractAudioFileMetadata } from '../utils/audioMetadataParser';
 import {
   CollectionAnalysis,
@@ -29,6 +43,7 @@ import {
   analyzeCollection,
   performSafeCleanup,
 } from '../utils/collectionCleaner';
+import { importSampleMusicCollection } from '../services/localCollectionImporter';
 import {
   DeletedBatchRecord,
   filterSongsAfterBulkDelete,
@@ -37,7 +52,6 @@ import {
   restoreDeletedBatch,
   isSongWithLocalAudio,
 } from '../utils/bulkDelete';
-import { getAudioBlob } from '../services/storageIndexedDB';
 
 const STORAGE_KEY_PREFIX = 'melodyvault_v1_';
 
@@ -109,11 +123,19 @@ interface MusicContextType {
   repeatMode: 'off' | 'all' | 'one';
   queue: Song[];
   isInstrumentalMode: boolean;
+  audioSource: 'original' | 'instrumental';
+  hasInstrumental: boolean;
   isQueueOpen: boolean;
   setIsQueueOpen: (open: boolean) => void;
+  isExpandedPlayerOpen: boolean;
+  setIsExpandedPlayerOpen: (open: boolean) => void;
+  isSeparationModalOpen: boolean;
+  setIsSeparationModalOpen: (open: boolean) => void;
+  selectedSongForSeparation: Song | null;
+  setSelectedSongForSeparation: (song: Song | null) => void;
 
   // Player Controls
-  playSong: (song: Song, overrideQueue?: Song[]) => void;
+  playSong: (song: Song, overrideQueue?: Song[], preferredSource?: 'original' | 'instrumental') => Promise<boolean>;
   togglePlayPause: () => void;
   playNext: () => void;
   playPrevious: () => void;
@@ -126,6 +148,10 @@ interface MusicContextType {
   removeFromQueue: (index: number) => void;
   clearQueue: () => void;
   toggleInstrumentalMode: () => void;
+  setAudioSource: (source: 'original' | 'instrumental') => Promise<boolean>;
+  toggleAudioSource: () => Promise<boolean>;
+  openSeparationModal: (song?: Song) => void;
+  refreshSeparationStatus: (songId?: string) => Promise<boolean>;
 
   // Personal Vault Features
   timeCapsules: TimeCapsule[];
@@ -142,11 +168,16 @@ interface MusicContextType {
   deleteBucketItem: (id: string) => void;
   migrateBucketToLibrary: (item: BucketListItem) => void;
 
-  // Music Quest & Gamification
+  // Music Quest, Dynamic Quests & Centralized XP
   xp: number;
   streakDays: number;
   badges: QuestBadge[];
-  leaderboard: LeaderboardUser[];
+  userProfile: UserProfile;
+  activeQuests: DynamicQuest[];
+  questHistory: QuestHistoryRecord[];
+  claimQuestReward: (questId: string) => { success: boolean; xpAwarded: number; reason?: string };
+  dailyListeningXPToday: number;
+  dailyListeningXPCap: number;
   awardXP: (amount: number, reason: string) => void;
 
   // System Settings & Data Backup
@@ -184,6 +215,28 @@ interface MusicContextType {
   undoLastDelete: () => Promise<{ success: boolean; restoredCount: number }>;
   deletedBatchBackup: DeletedBatchRecord | null;
   clearDeletedBatchBackup: () => void;
+
+  // Java 25 & Spring Boot REST API Status & Public Catalogue
+  backendStatus: {
+    isOnline: boolean;
+    checked: boolean;
+    profile: string;
+    port: number;
+  };
+  refreshBackendStatus: () => Promise<void>;
+  catalogueTracks: Song[];
+  syncLocalSampleMusic: (isSilent?: boolean) => Promise<void>;
+  vaultSyncState: {
+    status: 'idle' | 'scanning' | 'synced' | 'offline' | 'error';
+    message: string;
+    trackCount: number;
+  };
+  isOnboardingOpen: boolean;
+  setIsOnboardingOpen: (open: boolean) => void;
+  updateUserProfile: (profile: Partial<UserProfile>) => Promise<void>;
+  completeOnboarding: (profile: UserProfile) => Promise<void>;
+  logoutCreator: () => Promise<void>;
+  logoutAllCreatorDevices: () => Promise<void>;
 }
 
 const MusicContext = createContext<MusicContextType | null>(null);
@@ -206,6 +259,20 @@ function saveToStorage<T>(key: string, value: T) {
   }
 }
 
+const UNWANTED_CATALOGUE_TITLES = [
+  'canon in d major',
+  'clair de lune',
+  'gymnopédie no. 1',
+  'gymnopedie no. 1',
+  'prelude in c major (bwv 846)',
+  'prelude in c major',
+  'the four seasons: spring (allegro)',
+  'the four seasons: spring',
+  'moonlight sonata (adagio sostenuto)',
+  'moonlight sonata',
+];
+const UNWANTED_CATALOGUE_IDS = ['cat-track-1', 'cat-track-2', 'cat-track-3', 'cat-track-4', 'cat-track-5', 'cat-track-6'];
+
 export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   // Navigation & Search
   const [activeTab, setActiveTab] = useState<NavigationTab>('dashboard');
@@ -213,19 +280,280 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const [searchQuery, setSearchQuery] = useState('');
   const [toast, setToast] = useState<Toast | null>(null);
   const [isQueueOpen, setIsQueueOpen] = useState(false);
+  const [isExpandedPlayerOpen, setIsExpandedPlayerOpen] = useState(false);
 
-  // Stored State (Clean personal defaults for fresh installations)
-  const [songs, setSongs] = useState<Song[]>(() => loadFromStorage('songs', []));
-  const [playlists, setPlaylists] = useState<Playlist[]>(() => loadFromStorage('playlists', []));
+  const showToast = useCallback(
+    (
+      message: string,
+      type: 'success' | 'info' | 'warning' = 'info',
+      action?: ToastAction,
+      duration?: number
+    ) => {
+      const id = Date.now().toString();
+      setToast({ id, message, type, action, duration });
+    },
+    []
+  );
+
+  const hideToast = useCallback(() => {
+    setToast(null);
+  }, []);
+
+  useEffect(() => {
+    if (!toast) return;
+    const timeoutMs = toast.duration || (toast.action ? 12000 : 3800);
+    const t = setTimeout(() => {
+      setToast(null);
+    }, timeoutMs);
+    return () => clearTimeout(t);
+  }, [toast]);
+
+
+  // Java Backend Telemetry State
+  const [backendStatus, setBackendStatus] = useState<{
+    isOnline: boolean;
+    checked: boolean;
+    profile: string;
+    port: number;
+  }>({
+    isOnline: false,
+    checked: false,
+    profile: 'dev',
+    port: 8085,
+  });
+
+  const [catalogueTracks, setCatalogueTracks] = useState<Song[]>(() => PUBLIC_CATALOGUE_FALLBACK_TRACKS);
+  const catalogueTracksRef = useRef(catalogueTracks);
+  useEffect(() => {
+    catalogueTracksRef.current = catalogueTracks;
+  }, [catalogueTracks]);
+
+  // Stored State (Clean personal defaults + authorized public catalogue tracks)
+  const [songs, setSongs] = useState<Song[]>(() => {
+    const rawSongs = loadFromStorage<Song[]>('songs', []);
+    const personalSongs = rawSongs
+      .filter((s) => {
+        if (s.source === 'public_catalogue') return false;
+        if (UNWANTED_CATALOGUE_IDS.includes(s.id)) return false;
+        const lowTitle = (s.title || '').trim().toLowerCase();
+        if (UNWANTED_CATALOGUE_TITLES.some((u) => lowTitle === u || lowTitle.includes(u))) return false;
+        return true;
+      })
+      .map((s) => {
+        // Normalize imported tracks so source, isLocalImport, and audioAvailability are consistent
+        if (s.isLocalImport || s.audioAvailability === 'local_file' || s.source === 'user_import' || (typeof s.id === 'string' && s.id.startsWith('local-'))) {
+          return {
+            ...s,
+            source: 'user_import' as const,
+            isLocalImport: true,
+            audioAvailability: 'local_file' as const,
+          };
+        }
+        return {
+          ...s,
+          source: 'user_manual' as const,
+          isLocalImport: false,
+          audioAvailability: 'metadata_only' as const,
+        };
+      });
+    return [...PUBLIC_CATALOGUE_FALLBACK_TRACKS, ...personalSongs];
+  });
+  const songsRef = useRef(songs);
+  useEffect(() => {
+    songsRef.current = songs;
+  }, [songs]);
+  const [playlists, setPlaylists] = useState<Playlist[]>(() => {
+    const loaded = loadFromStorage<Playlist[]>('playlists', []);
+    return loaded.map((pl) => ({
+      ...pl,
+      songIds: (pl.songIds || []).filter((sid) => !UNWANTED_CATALOGUE_IDS.includes(sid)),
+    }));
+  });
   const [timeCapsules, setTimeCapsules] = useState<TimeCapsule[]>(() => loadFromStorage('time_capsules', []));
   const [memories, setMemories] = useState<SongMemory[]>(() => loadFromStorage('memories', []));
   const [bucketList, setBucketList] = useState<BucketListItem[]>(() => loadFromStorage('bucket_list', []));
-  const [xp, setXp] = useState<number>(() => loadFromStorage('xp', 0));
+  const [xp, setXp] = useState<number>(() => {
+    const stored = loadFromStorage('xp', 0);
+    xpService.migrateExistingXP(stored);
+    return xpService.getTotalXP();
+  });
   const [streakDays, setStreakDays] = useState<number>(() => loadFromStorage('streak_days', 0));
   const [badges, setBadges] = useState<QuestBadge[]>(() => loadFromStorage('badges', INITIAL_BADGES));
   const [equalizerPreset, setEqualizerPreset] = useState<string>(() => loadFromStorage('eq_preset', 'Bass Boost'));
   const [audioQuality, setAudioQuality] = useState<string>(() => loadFromStorage('audio_quality', 'High (320 kbps)'));
   const [crossfadeSecs, setCrossfadeSecs] = useState<number>(() => loadFromStorage('crossfade', 2));
+
+  // Dynamic Quests & Centralized Anti-Farming XP State
+  const [activeQuests, setActiveQuests] = useState<DynamicQuest[]>(() =>
+    questService.syncQuests(loadFromStorage<Song[]>('songs', []))
+  );
+  const [questHistory, setQuestHistory] = useState<QuestHistoryRecord[]>(() =>
+    questService.getHistory()
+  );
+  const [dailyListeningXPToday, setDailyListeningXPToday] = useState<number>(() =>
+    xpService.getListeningXPToday()
+  );
+  const dailyListeningXPCap = 150;
+
+  // Vocal Separation & Stem Playback State
+  const [audioSource, setAudioSourceState] = useState<'original' | 'instrumental'>('original');
+  const [hasInstrumental, setHasInstrumental] = useState<boolean>(false);
+  const [isSeparationModalOpen, setIsSeparationModalOpen] = useState(false);
+  const [selectedSongForSeparation, setSelectedSongForSeparation] = useState<Song | null>(null);
+
+  // User Profile & First-Time Onboarding State
+  const [rawProfile, setRawProfile] = useState<UserProfile>(() =>
+    loadFromStorage<UserProfile>('current_user', CURRENT_USER_PROFILE)
+  );
+  const [isOnboardingOpen, setIsOnboardingOpen] = useState<boolean>(() => {
+    return !localStorage.getItem(STORAGE_KEY_PREFIX + 'current_user');
+  });
+
+  const userProfile: UserProfile = useMemo(() => {
+    const { level } = calculateLevelFromXP(xp);
+    return {
+      ...rawProfile,
+      xp,
+      level,
+      badgesCount: badges.filter((b) => b.isUnlocked).length,
+    };
+  }, [rawProfile, xp, badges]);
+
+  const updateUserProfile = useCallback(
+    async (updates: Partial<UserProfile>) => {
+      setRawProfile((prev) => {
+        const next = { ...prev, ...updates };
+        saveToStorage('current_user', next);
+        return next;
+      });
+
+      if (backendStatus.isOnline) {
+        try {
+          await apiService.saveUserProfile({
+            id: updates.id || rawProfile.id,
+            displayName: updates.name || rawProfile.name,
+            avatarUrl: updates.avatar || rawProfile.avatar,
+            bio: updates.bio || rawProfile.bio,
+            totalXp: xp,
+            level: calculateLevelFromXP(xp).level,
+            streakDays,
+            badgesCount: badges.filter((b) => b.isUnlocked).length,
+            joinedLeaderboard: updates.joinedLeaderboard ?? rawProfile.joinedLeaderboard ?? true,
+          });
+        } catch (err) {
+          console.warn('Failed to sync profile update to backend', err);
+        }
+      }
+    },
+    [backendStatus.isOnline, rawProfile, xp, streakDays, badges]
+  );
+
+  const completeOnboarding = useCallback(
+    async (profile: UserProfile) => {
+      setRawProfile(profile);
+      saveToStorage('current_user', profile);
+      setIsOnboardingOpen(false);
+
+      if (backendStatus.isOnline) {
+        try {
+          await apiService.saveUserProfile({
+            id: profile.id,
+            displayName: profile.name,
+            avatarUrl: profile.avatar,
+            bio: profile.bio,
+            totalXp: xp,
+            level: calculateLevelFromXP(xp).level,
+            streakDays,
+            badgesCount: badges.filter((b) => b.isUnlocked).length,
+            joinedLeaderboard: profile.joinedLeaderboard ?? true,
+          });
+
+          if (profile.joinedLeaderboard) {
+            await apiService.syncLeaderboard({
+              userId: profile.id,
+              displayName: profile.name,
+              avatarUrl: profile.avatar,
+              totalXp: xp,
+              level: calculateLevelFromXP(xp).level,
+              tierTitle: calculateLevelFromXP(xp).currentTierTitle,
+            });
+          }
+        } catch (err) {
+          console.warn('Failed to send onboarding profile to backend', err);
+        }
+      }
+      showToast(`Welcome to MelodyVault, ${profile.name}!`, 'success');
+    },
+    [backendStatus.isOnline, xp, streakDays, badges, showToast]
+  );
+
+  // Auto-restore verified Creator session on app mount if persistent cookie/token exists
+  useEffect(() => {
+    const restoreSession = async () => {
+      try {
+        const session = await apiService.checkCreatorSession();
+        if (session.authenticated && session.userId === 'user-navneeth') {
+          setRawProfile((prev) => {
+            if (prev.id !== 'user-navneeth') {
+              const creatorProfile: UserProfile = {
+                id: 'user-navneeth',
+                name: 'Navneeth.U',
+                handle: '@navneeth',
+                avatar: '/avatars/navneeth_u.jpg',
+                tag: 'Vault Creator & Lead Architect',
+                bio: 'Curating pristine personal music collections with lossless audio in MelodyVault.',
+                joinedLeaderboard: true,
+              };
+              saveToStorage('current_user', creatorProfile);
+              return creatorProfile;
+            }
+            return prev;
+          });
+        }
+      } catch {
+        // Backend offline or unconfigured
+      }
+    };
+    restoreSession();
+  }, []);
+
+  const logoutCreator = useCallback(async () => {
+    await apiService.logoutCreator();
+    const guestProfile: UserProfile = {
+      id: `user-guest-${Date.now().toString(36)}`,
+      name: 'Guest Listener',
+      handle: '@guest',
+      avatar: '/avatars/preset-aurora.jpg',
+      tag: 'Music Explorer',
+      bio: 'Exploring melodies on MelodyVault.',
+      joinedLeaderboard: false,
+    };
+    setRawProfile(guestProfile);
+    saveToStorage('current_user', guestProfile);
+    showToast('Signed out from Creator profile.', 'info');
+  }, [showToast]);
+
+  const logoutAllCreatorDevices = useCallback(async () => {
+    await apiService.logoutAllCreatorDevices();
+    const guestProfile: UserProfile = {
+      id: `user-guest-${Date.now().toString(36)}`,
+      name: 'Guest Listener',
+      handle: '@guest',
+      avatar: '/avatars/preset-aurora.jpg',
+      tag: 'Music Explorer',
+      bio: 'Exploring melodies on MelodyVault.',
+      joinedLeaderboard: false,
+    };
+    setRawProfile(guestProfile);
+    saveToStorage('current_user', guestProfile);
+    showToast('Signed out of Creator profile across all devices.', 'info');
+  }, [showToast]);
+
+  // Sync quests when collection changes
+  useEffect(() => {
+    const updated = questService.syncQuests(songs);
+    setActiveQuests(updated);
+  }, [songs]);
 
   // Personal Cleanup & Migration State
   const [isCleanupModalOpen, setIsCleanupModalOpen] = useState(false);
@@ -277,8 +605,192 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     refreshStorageStats();
   }, [refreshStorageStats]);
 
-  // Sync state to local storage
-  useEffect(() => saveToStorage('songs', songs), [songs]);
+  const [vaultSyncState, setVaultSyncState] = useState<{
+    status: 'idle' | 'scanning' | 'synced' | 'offline' | 'error';
+    message: string;
+    trackCount: number;
+  }>({
+    status: 'idle',
+    message: 'Connecting to vault...',
+    trackCount: 0,
+  });
+
+  const autoScanExecutedRef = useRef(false);
+
+  const syncLocalSampleMusic = useCallback(
+    async (isSilent = false) => {
+      try {
+        setVaultSyncState({
+          status: 'scanning',
+          message: 'Scanning C:\\MelodyVault Sample Music for personal audio tracks...',
+          trackCount: 0,
+        });
+        setIsImporting(true);
+
+        const res = await importSampleMusicCollection((msg) => {
+          if (!isSilent) {
+            showToast(msg, 'info', undefined, 1200);
+          }
+        });
+
+        if (res.songs.length > 0) {
+          setSongs((prev) => {
+            const userOnly = prev.filter((s) => s.source !== 'public_catalogue');
+            const merged = [...userOnly];
+            for (const s of res.songs) {
+              const existingIdx = merged.findIndex(
+                (m) =>
+                  m.id === s.id ||
+                  (m.title.toLowerCase() === s.title.toLowerCase() &&
+                    m.artist.toLowerCase() === s.artist.toLowerCase())
+              );
+              if (existingIdx >= 0) {
+                merged[existingIdx] = {
+                  ...s,
+                  playCount: merged[existingIdx].playCount || 0,
+                  isFavorite: merged[existingIdx].isFavorite || false,
+                  lastPlayedAt: merged[existingIdx].lastPlayedAt || null,
+                  lyrics: merged[existingIdx].lyrics?.length ? merged[existingIdx].lyrics : s.lyrics,
+                  artwork: s.artwork || merged[existingIdx].artwork,
+                };
+              } else {
+                merged.push(s);
+              }
+            }
+            saveToStorage('songs', merged);
+            return [...catalogueTracksRef.current, ...merged];
+          });
+
+          await refreshStorageStats();
+
+          setVaultSyncState({
+            status: 'synced',
+            message: `${res.songs.length} tracks synchronized`,
+            trackCount: res.songs.length,
+          });
+
+          if (!isSilent) {
+            if (res.importedCount > 0) {
+              showToast(
+                `Synchronized ${res.importedCount} new local tracks from C:\\MelodyVault Sample Music!`,
+                'success'
+              );
+            } else {
+              showToast(`All ${res.songs.length} local tracks are synchronized and ready.`, 'info');
+            }
+          }
+        }
+      } catch (err) {
+        console.error('Failed to sync sample music:', err);
+        setVaultSyncState({
+          status: 'error',
+          message: 'Could not scan local music folder',
+          trackCount: 0,
+        });
+        if (!isSilent) {
+          showToast(
+            'Could not scan C:\\MelodyVault Sample Music. Make sure Java backend is running.',
+            'warning'
+          );
+        }
+      } finally {
+        setIsImporting(false);
+      }
+    },
+    [refreshStorageStats, showToast]
+  );
+
+  const refreshBackendStatus = useCallback(async () => {
+    try {
+      const isOnline = await apiService.checkHealth();
+      setBackendStatus({
+        isOnline,
+        checked: true,
+        profile: 'dev',
+        port: 8085,
+      });
+
+      if (isOnline) {
+        const remoteCatalogue = await apiService.getCatalogueTracks();
+        const cleanCatalogue = (remoteCatalogue || []).filter((t) => {
+          if (UNWANTED_CATALOGUE_IDS.includes(t.id)) return false;
+          const lowTitle = (t.title || '').trim().toLowerCase();
+          return !UNWANTED_CATALOGUE_TITLES.some((u) => lowTitle === u || lowTitle.includes(u));
+        });
+
+        const mapped: Song[] = cleanCatalogue.map((t) => ({
+          id: t.id,
+          title: t.title,
+          artist: t.artist,
+          album: t.album,
+          genre: t.genre,
+          language: t.language,
+          duration: t.duration,
+          artwork: t.artworkUrl,
+          audioUrl: t.audioUrl,
+          streamUrl: t.audioUrl,
+          audioAvailability: 'stream' as const,
+          source: 'public_catalogue' as const,
+          isPublicCatalogue: true,
+          isLocalImport: false,
+          year: t.releaseYear,
+          playCount: t.playCount || 0,
+          lastPlayedAt: null,
+          isFavorite: false,
+          mood: (t.genre === 'Ambient' ? 'Chill Lo-Fi' : t.genre === 'Baroque' ? 'Romantic' : 'Deep Focus') as any,
+          licence: t.licenceType,
+          attribution: t.attribution,
+          lyrics: t.lyrics
+            ? t.lyrics.split('\n').map((line, idx) => {
+                const m = line.match(/\[(\d+):(\d+)\]\s*(.*)/);
+                if (m) {
+                  const s = parseInt(m[1], 10) * 60 + parseInt(m[2], 10);
+                  return { time: s, text: m[3] };
+                }
+                return { time: idx * 30, text: line };
+              })
+            : [],
+        }));
+        setCatalogueTracks(mapped);
+        setSongs((prev) => {
+          const userOnly = prev.filter((s) => {
+            if (s.source === 'public_catalogue') return false;
+            if (UNWANTED_CATALOGUE_IDS.includes(s.id)) return false;
+            const lowTitle = (s.title || '').trim().toLowerCase();
+            return !UNWANTED_CATALOGUE_TITLES.some((u) => lowTitle === u || lowTitle.includes(u));
+          });
+          return [...mapped, ...userOnly];
+        });
+
+        // Auto-scan personal music vault on backend startup once
+        if (!autoScanExecutedRef.current) {
+          autoScanExecutedRef.current = true;
+          syncLocalSampleMusic(true);
+        }
+      } else {
+        setVaultSyncState({
+          status: 'offline',
+          message: 'Offline (Local cache)',
+          trackCount: songsRef.current.filter((s) => s.isLocalImport).length,
+        });
+      }
+    } catch (err) {
+      console.warn('Backend sync warning', err);
+      setVaultSyncState({
+        status: 'offline',
+        message: 'Offline (Local cache)',
+        trackCount: songsRef.current.filter((s) => s.isLocalImport).length,
+      });
+    }
+  }, [syncLocalSampleMusic]);
+
+  useEffect(() => {
+    refreshBackendStatus();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Sync state to local storage (only personal songs are stored; public catalogue is fetched dynamically)
+  useEffect(() => saveToStorage('songs', songs.filter((s) => s.source !== 'public_catalogue')), [songs]);
   useEffect(() => saveToStorage('playlists', playlists), [playlists]);
   useEffect(() => saveToStorage('time_capsules', timeCapsules), [timeCapsules]);
   useEffect(() => saveToStorage('memories', memories), [memories]);
@@ -290,31 +802,6 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   useEffect(() => saveToStorage('audio_quality', audioQuality), [audioQuality]);
   useEffect(() => saveToStorage('crossfade', crossfadeSecs), [crossfadeSecs]);
 
-  const showToast = useCallback(
-    (
-      message: string,
-      type: 'success' | 'info' | 'warning' = 'info',
-      action?: ToastAction,
-      duration?: number
-    ) => {
-      const id = Date.now().toString();
-      setToast({ id, message, type, action, duration });
-    },
-    []
-  );
-
-  const hideToast = useCallback(() => {
-    setToast(null);
-  }, []);
-
-  useEffect(() => {
-    if (!toast) return;
-    const timeoutMs = toast.duration || (toast.action ? 12000 : 3800);
-    const t = setTimeout(() => {
-      setToast(null);
-    }, timeoutMs);
-    return () => clearTimeout(t);
-  }, [toast]);
 
   // Award XP helper
   const awardXP = useCallback(
@@ -328,12 +815,55 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     [showToast]
   );
 
+
+  const handleTrackEndedRef = useRef<() => void>(() => {});
+  const currentSongRef = useRef<Song | null>(null);
+  const lastTimeUpdateRef = useRef<number>(0);
+
+  useEffect(() => {
+    currentSongRef.current = currentSong;
+  }, [currentSong]);
+
   // Player Engine event hooks
   useEffect(() => {
     audioEngine.setListeners({
       onTimeUpdate: (cur, dur) => {
         setCurrentTime(cur);
         if (dur > 0) setDuration(dur);
+
+        const activeTrack = currentSongRef.current;
+        if (activeTrack && isPlayableSong(activeTrack)) {
+          // Anti-farming check (continuous 80% listening)
+          const xpRes = xpService.updateListeningProgress(
+            activeTrack.id,
+            cur,
+            dur > 0 ? dur : activeTrack.duration,
+            activeTrack.title
+          );
+          if (xpRes.awarded) {
+            setXp(xpService.getTotalXP());
+            setDailyListeningXPToday(xpService.getListeningXPToday());
+            showToast(`+${xpRes.amount} XP: First complete listen of "${activeTrack.title}"!`, 'success');
+            // Log to Java backend XP ledger
+            apiService.claimReward(
+              `first-listen-${activeTrack.id}-${Date.now()}`,
+              'FIRST_LISTEN',
+              `First complete listen of "${activeTrack.title}"`,
+              xpRes.amount,
+              activeTrack.id,
+              activeTrack.title
+            ).catch(() => {});
+          }
+
+          // Listening minutes for quests (immune to skip/seek)
+          const last = lastTimeUpdateRef.current;
+          if (cur > last && cur - last <= 2.5) {
+            const deltaMin = (cur - last) / 60;
+            questService.addListeningMinutes(deltaMin);
+            setActiveQuests(questService.getActiveQuests());
+          }
+          lastTimeUpdateRef.current = cur;
+        }
       },
       onStatusChange: (status, errorMsg) => {
         setPlayerStatus(status);
@@ -345,81 +875,74 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         }
       },
       onEnded: () => {
-        handleTrackEnded();
+        const endedTrack = currentSongRef.current;
+        if (endedTrack) {
+          apiService.recordListenStat(
+            endedTrack.id,
+            endedTrack.title,
+            endedTrack.artist,
+            endedTrack.genre,
+            endedTrack.duration,
+            true
+          ).catch(() => {});
+        }
+        handleTrackEndedRef.current();
+      },
+      onAudioSourceChange: (source) => {
+        setAudioSourceState(source);
       },
     });
-  }, []);
+  }, [showToast]);
 
-  const handleTrackEnded = useCallback(() => {
-    if (repeatMode === 'one' && currentSong) {
-      audioEngine.seek(0);
-      audioEngine.playSong(currentSong);
-      return;
-    }
-    playNext();
-  }, [repeatMode, currentSong]);
-
-  // Play next track
-  const playNext = useCallback(() => {
-    if (!currentSong) return;
-
-    if (queue.length > 0) {
-      const nextSong = queue[0];
-      setQueue((q) => q.slice(1));
-      playSong(nextSong);
-      return;
-    }
-
-    // Default library loop
-    const activeList = songs;
-    if (activeList.length === 0) return;
-
-    if (isShuffle) {
-      const randomIndex = Math.floor(Math.random() * activeList.length);
-      playSong(activeList[randomIndex]);
-      return;
-    }
-
-    const currentIndex = activeList.findIndex((s) => s.id === currentSong.id);
-    if (currentIndex >= 0 && currentIndex < activeList.length - 1) {
-      playSong(activeList[currentIndex + 1]);
-    } else if (repeatMode === 'all') {
-      playSong(activeList[0]);
-    } else {
-      audioEngine.pause();
-      setIsPlaying(false);
-    }
-  }, [currentSong, queue, songs, isShuffle, repeatMode]);
-
-  // Play previous track
-  const playPrevious = useCallback(() => {
-    if (!currentSong) return;
-    if (currentTime > 4) {
-      audioEngine.seek(0);
-      setCurrentTime(0);
-      return;
-    }
-
-    const currentIndex = songs.findIndex((s) => s.id === currentSong.id);
-    if (currentIndex > 0) {
-      playSong(songs[currentIndex - 1]);
-    } else {
-      playSong(songs[songs.length - 1]);
-    }
-  }, [currentSong, currentTime, songs]);
-
-  // Play Song action
+  // Play Song action with central playability & IndexedDB verification
   const playSong = useCallback(
-    (song: Song, overrideQueue?: Song[]) => {
-      setCurrentSong(song);
-      setCurrentTime(0);
-      setDuration(song.duration);
-
-      if (overrideQueue) {
-        setQueue(overrideQueue);
+    async (song: Song, overrideQueue?: Song[], preferredSource?: 'original' | 'instrumental'): Promise<boolean> => {
+      // 1. Central validation check
+      const validation = validateSongPlayability(song);
+      if (!validation.canPlay || !isPlayableSong(song)) {
+        showToast(validation.message, 'warning');
+        return false;
       }
 
-      // Record play count and last played
+      // 2. Validate audio blob exists in browser IndexedDB for local user imports
+      if (song.source === 'user_import') {
+        try {
+          const blob = await getAudioBlob(song.id);
+          if (!blob || blob.size === 0) {
+            showToast(
+              `Local audio file for "${song.title}" is missing from browser storage (IndexedDB). Please re-import this track.`,
+              'warning'
+            );
+            audioEngine.reportAudioMissing(song.id);
+            return false;
+          }
+        } catch (err) {
+          showToast(
+            `Failed to check local storage for "${song.title}". Please try again.`,
+            'warning'
+          );
+          return false;
+        }
+      }
+
+      // 3. Audio source is verified! Set active track
+      setCurrentSong(song);
+      currentSongRef.current = song;
+      setCurrentTime(0);
+      lastTimeUpdateRef.current = 0;
+      setDuration(song.duration);
+
+      // Check instrumental stem availability (local imports only)
+      const hasInst = song.source === 'user_import' ? await hasSeparatedAudio(song.id) : false;
+      setHasInstrumental(hasInst);
+
+      // 4. Override queue with strictly playable tracks only
+      if (overrideQueue) {
+        const filteredQueue = overrideQueue.filter(isPlayableSong);
+        setQueue(filteredQueue);
+      }
+
+      // 5. Record play count and last played
       setSongs((prevSongs) =>
         prevSongs.map((s) =>
           s.id === song.id
@@ -428,17 +951,115 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         )
       );
 
-      awardXP(5, `Listening to "${song.title}"`);
-      audioEngine.playSong(song);
+      // 6. Anti-farming listening session start & Quest tracking
+      xpService.startListeningSession(song.id, song.duration, true);
+      questService.recordSongListen(song);
+      setActiveQuests(questService.getActiveQuests());
+
+      // 7. Telemetry log for public catalogue stream
+      if (song.source === 'public_catalogue') {
+        apiService.logCataloguePlay(song.id).catch(() => {});
+      }
+
+      const targetSrc = preferredSource || (hasInst && audioSource === 'instrumental' ? 'instrumental' : 'original');
+      const startRes = await audioEngine.playSong(song, 0, targetSrc);
+      setAudioSourceState(targetSrc);
+      return startRes;
     },
-    [awardXP]
+    [audioSource, showToast]
   );
+
+  // Play next track (strictly playable imported tracks only)
+  const playNext = useCallback(() => {
+    if (!currentSong) return;
+
+    // 1. Check queue for next playable song
+    if (queue.length > 0) {
+      const nextPlayableIndex = queue.findIndex(isPlayableSong);
+      if (nextPlayableIndex >= 0) {
+        const nextSong = queue[nextPlayableIndex];
+        setQueue((q) => q.slice(nextPlayableIndex + 1));
+        playSong(nextSong);
+        return;
+      } else {
+        setQueue([]);
+      }
+    }
+
+    // 2. Default library loop: only playable imported tracks
+    const playableSongs = songs.filter(isPlayableSong);
+    if (playableSongs.length === 0) {
+      audioEngine.pause();
+      setIsPlaying(false);
+      return;
+    }
+
+    const nextSong = getNextPlayableTrack({
+      songs: playableSongs,
+      currentSongId: currentSong.id,
+      isShuffle,
+      repeatMode,
+    });
+
+    if (nextSong) {
+      playSong(nextSong);
+    } else {
+      audioEngine.pause();
+      setIsPlaying(false);
+    }
+  }, [currentSong, queue, songs, isShuffle, repeatMode, playSong]);
+
+  // Play previous track (strictly playable imported tracks only)
+  const playPrevious = useCallback(() => {
+    if (!currentSong) return;
+    if (currentTime > 4) {
+      audioEngine.seek(0);
+      setCurrentTime(0);
+      return;
+    }
+
+    const playableSongs = songs.filter(isPlayableSong);
+    if (playableSongs.length === 0) return;
+
+    const prevSong = getPreviousPlayableTrack({
+      songs: playableSongs,
+      currentSongId: currentSong.id,
+    });
+
+    if (prevSong) {
+      playSong(prevSong);
+    }
+  }, [currentSong, currentTime, songs, playSong]);
+
+  const handleTrackEnded = useCallback(() => {
+    if (repeatMode === 'one' && currentSong && isPlayableSong(currentSong)) {
+      audioEngine.seek(0);
+      audioEngine.playSong(currentSong);
+      return;
+    }
+    playNext();
+  }, [repeatMode, currentSong, playNext]);
+
+  useEffect(() => {
+    handleTrackEndedRef.current = handleTrackEnded;
+  }, [handleTrackEnded]);
 
   const togglePlayPause = useCallback(() => {
     if (!currentSong) {
-      if (songs.length > 0) {
-        playSong(songs[0]);
+      const firstPlayable = songs.find(isPlayableSong);
+      if (firstPlayable) {
+        playSong(firstPlayable);
+      } else {
+        showToast(
+          'No playable imported tracks found in your vault. Import MP3 or WAV files to start listening.',
+          'info'
+        );
       }
+      return;
+    }
+
+    if (!isPlayableSong(currentSong)) {
+      showToast('Current track is not an imported audio file and cannot be played.', 'warning');
       return;
     }
 
@@ -447,7 +1068,7 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     } else {
       audioEngine.resume();
     }
-  }, [currentSong, isPlaying, songs, playSong]);
+  }, [currentSong, isPlaying, songs, playSong, showToast]);
 
   const seek = useCallback((seconds: number) => {
     audioEngine.seek(seconds);
@@ -491,6 +1112,13 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
   const addToQueue = useCallback(
     (song: Song) => {
+      if (!isPlayableSong(song)) {
+        showToast(
+          `Cannot add "${song.title}" to queue: Only imported MP3/WAV tracks can be played`,
+          'warning'
+        );
+        return;
+      }
       setQueue((q) => [...q, song]);
       showToast(`Added "${song.title}" to Queue`, 'success');
     },
@@ -535,22 +1163,43 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         ...songData,
         id: `song-${Date.now()}`,
         source: 'user_manual',
+        isLocalImport: false,
+        audioAvailability: 'metadata_only',
         playCount: 0,
         lastPlayedAt: null,
         isFavorite: false,
       };
       setSongs((prev) => [newSong, ...prev]);
       awardXP(25, `Cataloged new song "${newSong.title}"`);
-      showToast(`Song "${newSong.title}" added to Library`, 'success');
+      showToast(`Song "${newSong.title}" cataloged in Library (Metadata only)`, 'success');
     },
     [awardXP, showToast]
   );
 
   const updateSong = useCallback(
     (updatedSong: Song) => {
-      setSongs((prev) => prev.map((s) => (s.id === updatedSong.id ? updatedSong : s)));
+      setSongs((prev) =>
+        prev.map((s) => {
+          if (s.id === updatedSong.id) {
+            const isImported = s.isLocalImport || s.source === 'user_import' || s.audioAvailability === 'local_file';
+            return {
+              ...updatedSong,
+              source: isImported ? 'user_import' : (s.source || 'user_manual'),
+              isLocalImport: isImported,
+              audioAvailability: isImported ? 'local_file' : 'metadata_only',
+            };
+          }
+          return s;
+        })
+      );
       if (currentSong?.id === updatedSong.id) {
-        setCurrentSong(updatedSong);
+        const isImported = currentSong.isLocalImport || currentSong.source === 'user_import' || currentSong.audioAvailability === 'local_file';
+        setCurrentSong({
+          ...updatedSong,
+          source: isImported ? 'user_import' : (currentSong.source || 'user_manual'),
+          isLocalImport: isImported,
+          audioAvailability: isImported ? 'local_file' : 'metadata_only',
+        });
       }
       showToast(`Song "${updatedSong.title}" updated`, 'success');
     },
@@ -597,7 +1246,15 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const bulkDeleteSongs = useCallback(
     async (songIds: string[]): Promise<{ success: boolean; deletedCount: number; importedCount: number }> => {
       if (songIds.length === 0) return { success: false, deletedCount: 0, importedCount: 0 };
-      const selectedIdSet = new Set(songIds);
+
+      // Protect public catalogue tracks from deletion
+      const userSelectedSongIds = songIds.filter((id) => !id.startsWith('cat-track-'));
+      if (userSelectedSongIds.length === 0) {
+        showToast('Public catalogue tracks are built-in library items and cannot be removed.', 'info');
+        return { success: false, deletedCount: 0, importedCount: 0 };
+      }
+
+      const selectedIdSet = new Set(userSelectedSongIds);
       const { remainingSongs, deletedSongs } = filterSongsAfterBulkDelete(songs, selectedIdSet);
       if (deletedSongs.length === 0) return { success: false, deletedCount: 0, importedCount: 0 };
 
@@ -719,6 +1376,7 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       setPlaylists((prev) => [newPlaylist, ...prev]);
       awardXP(30, `Created playlist "${newPlaylist.name}"`);
       showToast(`Created Playlist "${newPlaylist.name}"`, 'success');
+      apiService.savePlaylist(newPlaylist).catch(() => {});
       return newPlaylist;
     },
     [awardXP, showToast]
@@ -730,6 +1388,7 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         prev.map((p) => (p.id === updatedPlaylist.id ? { ...updatedPlaylist, updatedAt: new Date().toISOString() } : p))
       );
       showToast(`Playlist "${updatedPlaylist.name}" updated`, 'success');
+      apiService.savePlaylist(updatedPlaylist).catch(() => {});
     },
     [showToast]
   );
@@ -743,6 +1402,7 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         setActiveTab('playlists');
       }
       showToast(`Deleted playlist "${target?.name || ''}"`, 'info');
+      apiService.deletePlaylist(id).catch(() => {});
     },
     [playlists, selectedPlaylistId, showToast]
   );
@@ -908,10 +1568,12 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         language: 'English',
         duration: 210,
         artwork: 'https://images.unsplash.com/photo-1514525253161-7a46d19cd819?w=500&auto=format&fit=crop&q=80',
-        audioAvailability: 'preview',
+        audioAvailability: 'metadata_only',
+        source: 'user_manual',
+        isLocalImport: false,
         year: new Date().getFullYear(),
-        playCount: 1,
-        lastPlayedAt: new Date().toISOString(),
+        playCount: 0,
+        lastPlayedAt: null,
         isFavorite: false,
         mood: 'Euphoric',
         lyrics: [{ time: 0, text: `[Discovered from Bucket List: ${item.notes || 'Curated recommendation'}]` }],
@@ -919,8 +1581,8 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
       setSongs((prev) => [newSong, ...prev]);
       toggleBucketListened(item.id);
-      awardXP(45, `Imported "${item.title}" into Music Library`);
-      showToast(`Migrated "${item.title}" to Library`, 'success');
+      awardXP(45, `Cataloged "${item.title}" into Music Library`);
+      showToast(`Migrated "${item.title}" to Library (Metadata catalog entry)`, 'success');
     },
     [awardXP, showToast, toggleBucketListened]
   );
@@ -936,17 +1598,72 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     [songs]
   );
 
-  // Dynamic leaderboard updating with current user's XP
-  const leaderboard = useMemo(() => {
-    const userLevel = calculateLevelFromXP(xp).level;
-    const updated = DEMO_LEADERBOARD.map((u) => {
-      if (u.isCurrentUser) {
-        return { ...u, xp, level: userLevel };
+  // Dynamic Quests & Anti-Farming XP Actions
+  const claimQuestReward = useCallback(
+    (questId: string) => {
+      const targetQuest = activeQuests.find((q) => q.id === questId);
+      const res = questService.claimQuestReward(questId);
+      if (res.success && res.xpAwarded > 0) {
+        awardXP(res.xpAwarded, `Quest Completed: "${targetQuest?.title || 'Quest'}"`);
+        setActiveQuests(questService.getActiveQuests());
+        setQuestHistory(questService.getHistory());
+        // Synchronize reward claim with Java Spring Boot backend
+        apiService.claimReward(
+          `quest-${questId}-${Date.now()}`,
+          'QUEST',
+          targetQuest?.title || 'Quest',
+          res.xpAwarded,
+          undefined,
+          undefined
+        ).catch(() => {});
+      } else if (res.reason) {
+        showToast(res.reason, 'warning');
       }
-      return u;
-    });
-    return updated.sort((a, b) => b.xp - a.xp);
-  }, [xp]);
+      return res;
+    },
+    [activeQuests, awardXP, showToast]
+  );
+
+  // Vocal Separation & Dual Track Controls
+  const setAudioSource = useCallback(
+    async (source: 'original' | 'instrumental'): Promise<boolean> => {
+      const res = await audioEngine.switchAudioSource(source);
+      if (res.success) {
+        setAudioSourceState(source);
+        showToast(
+          source === 'instrumental'
+            ? 'Switched to Separated Instrumental Audio'
+            : 'Switched to Original Audio',
+          'info'
+        );
+        return true;
+      } else {
+        if (res.reason) showToast(res.reason, 'warning');
+        return false;
+      }
+    },
+    [showToast]
+  );
+
+  const toggleAudioSource = useCallback(async (): Promise<boolean> => {
+    const target = audioSource === 'original' ? 'instrumental' : 'original';
+    return setAudioSource(target);
+  }, [audioSource, setAudioSource]);
+
+  const openSeparationModal = useCallback((song?: Song) => {
+    setSelectedSongForSeparation(song || currentSong);
+    setIsSeparationModalOpen(true);
+  }, [currentSong]);
+
+  const refreshSeparationStatus = useCallback(async (songId?: string): Promise<boolean> => {
+    const targetId = songId || currentSong?.id;
+    if (!targetId) return false;
+    const has = await hasSeparatedAudio(targetId);
+    if (targetId === currentSong?.id) {
+      setHasInstrumental(has);
+    }
+    return has;
+  }, [currentSong]);
 
   // Demo Cleanup & Migration Actions
   const cleanupDemoMusic = useCallback(() => {
@@ -1167,19 +1884,37 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
       if (newSongsToAdd.length > 0) {
         setSongs((prev) => [...newSongsToAdd, ...prev]);
-        const earnedXP = newSongsToAdd.length * 35;
-        awardXP(earnedXP, `Imported ${newSongsToAdd.length} local audio track${newSongsToAdd.length > 1 ? 's' : ''}`);
-        showToast(
-          `Successfully imported ${newSongsToAdd.length} track${newSongsToAdd.length > 1 ? 's' : ''}!`,
-          'success'
-        );
+
+        let totalImportXP = 0;
+        for (const newSong of newSongsToAdd) {
+          const xpRes = xpService.awardUniqueImport(newSong.id, newSong.title);
+          if (xpRes.awarded) {
+            totalImportXP += xpRes.amount;
+          }
+          questService.recordSongImport(newSong.id);
+        }
+
+        setXp(xpService.getTotalXP());
+        setActiveQuests(questService.getActiveQuests());
+
+        if (totalImportXP > 0) {
+          showToast(
+            `+${totalImportXP} XP: Successfully imported ${newSongsToAdd.length} local audio track${newSongsToAdd.length > 1 ? 's' : ''}!`,
+            'success'
+          );
+        } else {
+          showToast(
+            `Successfully imported ${newSongsToAdd.length} track${newSongsToAdd.length > 1 ? 's' : ''}!`,
+            'success'
+          );
+        }
         await refreshStorageStats();
       }
 
       setIsImporting(false);
       return { successCount, duplicateCount, errorCount };
     },
-    [songs, awardXP, showToast, refreshStorageStats]
+    [songs, showToast, refreshStorageStats]
   );
 
   return (
@@ -1220,8 +1955,16 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         repeatMode,
         queue,
         isInstrumentalMode,
+        audioSource,
+        hasInstrumental,
         isQueueOpen,
         setIsQueueOpen,
+        isExpandedPlayerOpen,
+        setIsExpandedPlayerOpen,
+        isSeparationModalOpen,
+        setIsSeparationModalOpen,
+        selectedSongForSeparation,
+        setSelectedSongForSeparation,
         playSong,
         togglePlayPause,
         playNext,
@@ -1235,6 +1978,10 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         removeFromQueue,
         clearQueue,
         toggleInstrumentalMode,
+        setAudioSource,
+        toggleAudioSource,
+        openSeparationModal,
+        refreshSeparationStatus,
         timeCapsules,
         createTimeCapsule,
         deleteTimeCapsule,
@@ -1249,7 +1996,12 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         xp,
         streakDays,
         badges,
-        leaderboard,
+        userProfile,
+        activeQuests,
+        questHistory,
+        claimQuestReward,
+        dailyListeningXPToday,
+        dailyListeningXPCap,
         awardXP,
         equalizerPreset,
         setEqualizerPreset,
@@ -1279,6 +2031,17 @@ export const MusicProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         undoLastDelete,
         deletedBatchBackup,
         clearDeletedBatchBackup,
+        backendStatus,
+        refreshBackendStatus,
+        catalogueTracks,
+        syncLocalSampleMusic,
+        vaultSyncState,
+        isOnboardingOpen,
+        setIsOnboardingOpen,
+        updateUserProfile,
+        completeOnboarding,
+        logoutCreator,
+        logoutAllCreatorDevices,
       }}
     >
       {children}

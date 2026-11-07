@@ -10,8 +10,9 @@ import {
   Calendar,
 } from 'lucide-react';
 import { useMusic } from '../context/MusicContext';
-import { filterForgottenSongs, formatDuration } from '../utils/pureLogic';
+import { filterForgottenSongs, formatDuration, isPlayableSong } from '../utils/pureLogic';
 import { Song } from '../types';
+import { SongArtwork } from '../components/common/SongArtwork';
 
 interface ForgottenSongsViewProps {
   onOpenAddToPlaylist: (song: Song) => void;
@@ -20,7 +21,7 @@ interface ForgottenSongsViewProps {
 export const ForgottenSongsView: React.FC<ForgottenSongsViewProps> = ({
   onOpenAddToPlaylist,
 }) => {
-  const { songs, playSong, toggleFavorite, createPlaylist, addSongToPlaylist, awardXP } = useMusic();
+  const { songs, playSong, toggleFavorite, createPlaylist, addSongToPlaylist, awardXP, showToast } = useMusic();
   const [daysThreshold, setDaysThreshold] = useState<number>(14);
 
   // Filter forgotten songs
@@ -29,9 +30,13 @@ export const ForgottenSongsView: React.FC<ForgottenSongsViewProps> = ({
   }, [songs, daysThreshold]);
 
   const handlePlayForgottenMix = () => {
-    if (forgottenSongs.length === 0) return;
+    const playableForgotten = forgottenSongs.filter(isPlayableSong);
+    if (playableForgotten.length === 0) {
+      showToast('No playable imported tracks found in forgotten songs.', 'info');
+      return;
+    }
     awardXP(30, 'Rediscovering forgotten library gems');
-    playSong(forgottenSongs[0], forgottenSongs.slice(1));
+    playSong(playableForgotten[0], playableForgotten.slice(1));
   };
 
   const handleCreateNostalgiaPlaylist = () => {
@@ -165,7 +170,7 @@ export const ForgottenSongsView: React.FC<ForgottenSongsViewProps> = ({
 
                     <td className="py-3 px-4">
                       <div className="flex items-center gap-3">
-                        <img
+                        <SongArtwork
                           src={song.artwork}
                           alt={song.title}
                           className="w-9 h-9 rounded object-cover shrink-0"

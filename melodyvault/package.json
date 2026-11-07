@@ -8,7 +8,8 @@
     "build": "vite build",
     "preview": "vite preview",
     "clean": "rm -rf dist server.js",
-    "lint": "tsc --noEmit"
+    "lint": "tsc --noEmit",
+    "test": "tsx --test src/utils/pureLogic.test.ts src/utils/bulkDelete.test.ts src/utils/collectionCleaner.test.ts src/services/collectionBackup.test.ts src/utils/audioMetadataParser.test.ts src/services/playbackEnforcement.test.ts src/utils/libraryAndPlayerUI.test.ts src/services/xpService.test.ts src/services/questService.test.ts src/tests/javaBackendAndCatalogue.test.ts src/tests/gamingAndSampleCollection.test.ts src/tests/leaderboardAndOnboarding.test.ts"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",

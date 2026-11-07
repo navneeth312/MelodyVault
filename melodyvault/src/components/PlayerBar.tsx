@@ -16,10 +16,12 @@ import {
   Radio,
   AlertCircle,
   Sparkles,
+  Maximize2,
 } from 'lucide-react';
 import { useMusic } from '../context/MusicContext';
-import { formatDuration } from '../utils/pureLogic';
+import { formatDuration, isPlayableSong } from '../utils/pureLogic';
 import { audioEngine } from '../services/audioEngine';
+import { SongArtwork } from './common/SongArtwork';
 
 export const PlayerBar: React.FC = () => {
   const {
@@ -33,6 +35,8 @@ export const PlayerBar: React.FC = () => {
     repeatMode,
     queue,
     isInstrumentalMode,
+    audioSource,
+    hasInstrumental,
     isQueueOpen,
     playerStatus,
     statusMessage,
@@ -45,8 +49,11 @@ export const PlayerBar: React.FC = () => {
     toggleShuffle,
     toggleRepeat,
     toggleInstrumentalMode,
+    toggleAudioSource,
+    openSeparationModal,
     toggleFavorite,
     setIsQueueOpen,
+    setIsExpandedPlayerOpen,
     setActiveTab,
   } = useMusic();
 
@@ -114,19 +121,100 @@ export const PlayerBar: React.FC = () => {
   const progressPercent = duration > 0 ? (currentTime / duration) * 100 : 0;
 
   return (
-    <footer className="h-20 bg-[#0d0e16] border-t border-[#1e202e] px-4 md:px-6 flex items-center justify-between gap-4 select-none z-40 relative">
+    <>
+      {/* Mobile Mini-Player (Sticky directly above mobile bottom nav) */}
+      {currentSong && (
+        <div className="fixed bottom-14 left-0 right-0 z-40 bg-[#11121d]/95 backdrop-blur-md border-t border-[#23253a] flex flex-col md:hidden select-none shadow-2xl">
+          {/* Progress Bar at Top */}
+          <div className="w-full h-1 bg-purple-950/60 overflow-hidden cursor-pointer" onClick={handleProgressClick}>
+            <div
+              className="h-full bg-gradient-to-r from-purple-500 to-violet-400"
+              style={{ width: `${progressPercent}%` }}
+            />
+          </div>
+
+          <div className="h-14 px-3 flex items-center justify-between gap-3">
+            {/* Tappable Track Metadata */}
+            <div
+              onClick={() => setIsExpandedPlayerOpen(true)}
+              className="flex items-center gap-2.5 min-w-0 flex-1 cursor-pointer"
+            >
+              <SongArtwork
+                src={currentSong.artwork}
+                alt={currentSong.title}
+                className="w-10 h-10 rounded-lg object-cover shadow shrink-0 border border-purple-500/20"
+              />
+              <div className="min-w-0 flex-1">
+                <div className="text-xs font-bold text-white truncate flex items-center gap-1.5">
+                  <span className="truncate">{currentSong.title}</span>
+                  {currentSong.source === 'public_catalogue' && (
+                    <span className="text-[8px] font-mono px-1 py-0.2 rounded bg-purple-500/20 text-purple-300 shrink-0 font-semibold">
+                      CATALOGUE
+                    </span>
+                  )}
+                </div>
+                <div className="text-[10px] text-slate-400 truncate">
+                  {currentSong.artist}
+                </div>
+              </div>
+            </div>
+
+            {/* Quick Actions (min 44px touch targets) */}
+            <div className="flex items-center gap-1 shrink-0">
+              <button
+                onClick={() => toggleFavorite(currentSong.id)}
+                className="w-11 h-11 flex items-center justify-center rounded-xl text-slate-400 hover:text-rose-400 cursor-pointer active:scale-95"
+                aria-label="Toggle favourite"
+              >
+                <Heart className={`w-4 h-4 ${currentSong.isFavorite ? 'fill-rose-500 text-rose-500' : ''}`} />
+              </button>
+
+              <button
+                onClick={togglePlayPause}
+                disabled={!isPlayableSong(currentSong)}
+                className="w-11 h-11 flex items-center justify-center rounded-xl bg-purple-600 text-white shadow-md shadow-purple-900/40 cursor-pointer active:scale-95 disabled:opacity-40"
+                aria-label={isPlaying ? 'Pause' : 'Play'}
+              >
+                {isPlaying ? (
+                  <Pause className="w-4 h-4 fill-white" />
+                ) : (
+                  <Play className="w-4 h-4 fill-white translate-x-0.5" />
+                )}
+              </button>
+
+              <button
+                onClick={playNext}
+                className="w-11 h-11 flex items-center justify-center rounded-xl text-slate-300 hover:text-white cursor-pointer active:scale-95"
+                aria-label="Next song"
+              >
+                <SkipForward className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Desktop Persistent Full Player */}
+      <footer className="h-20 bg-[#0d0e16] border-t border-[#1e202e] px-4 md:px-6 hidden md:flex items-center justify-between gap-4 select-none z-40 relative">
       {/* Track Metadata Zone (Left) */}
       <div className="flex items-center gap-3 w-1/4 min-w-[200px]">
         {currentSong ? (
           <>
-            <div className="relative group shrink-0">
-              <img
+            <div
+              onClick={() => setIsExpandedPlayerOpen(true)}
+              className="relative group shrink-0 cursor-pointer"
+              title="Click to open full expanded player"
+            >
+              <SongArtwork
                 src={currentSong.artwork}
                 alt={currentSong.title}
-                className="w-12 h-12 rounded-lg object-cover shadow-md border border-slate-700/50"
+                className="w-12 h-12 rounded-lg object-cover shadow-md border border-slate-700/50 group-hover:opacity-80 transition-opacity"
               />
+              <div className="absolute inset-0 bg-black/40 rounded-lg flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                <Maximize2 className="w-4 h-4 text-white" />
+              </div>
               {isPlaying && (
-                <div className="absolute inset-0 bg-black/40 rounded-lg flex items-center justify-center gap-0.5 px-2">
+                <div className="absolute inset-0 bg-black/40 rounded-lg flex items-center justify-center gap-0.5 px-2 group-hover:opacity-0 transition-opacity">
                   {visualizerBars.slice(0, 4).map((h, i) => (
                     <div
                       key={i}
@@ -144,26 +232,17 @@ export const PlayerBar: React.FC = () => {
                   {currentSong.title}
                 </span>
                 {/* Audio availability indicator */}
-                {currentSong.audioAvailability === 'stream' && (
+                {currentSong.audioAvailability === 'local_file' && currentSong.isLocalImport ? (
                   <span
-                    className="text-[9px] font-mono px-1 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 shrink-0"
-                    title="Real Audio Stream Available"
+                    className="text-[9px] font-mono px-1 py-0.5 rounded bg-cyan-500/15 text-cyan-300 border border-cyan-500/30 shrink-0 font-bold"
+                    title="Locally Stored Audio File"
                   >
-                    HD
+                    {currentSong.fileName?.toLowerCase().endsWith('.wav') ? 'LOCAL WAV' : 'LOCAL MP3'}
                   </span>
-                )}
-                {currentSong.audioAvailability === 'preview' && (
-                  <span
-                    className="text-[9px] font-mono px-1 py-0.5 rounded bg-purple-500/10 text-purple-400 border border-purple-500/20 shrink-0"
-                    title="Procedural Melodic Synthesizer Preview"
-                  >
-                    SYNTH
-                  </span>
-                )}
-                {currentSong.audioAvailability === 'metadata_only' && (
+                ) : (
                   <span
                     className="text-[9px] font-mono px-1 py-0.5 rounded bg-amber-500/10 text-amber-400 border border-amber-500/20 shrink-0"
-                    title="Catalog Metadata Only (Licensed)"
+                    title="Catalog Metadata Only (No Audio Binary)"
                   >
                     CATALOG
                   </span>
@@ -225,7 +304,7 @@ export const PlayerBar: React.FC = () => {
 
           <button
             onClick={togglePlayPause}
-            disabled={!currentSong}
+            disabled={currentSong ? !isPlayableSong(currentSong) : false}
             className="w-10 h-10 rounded-full bg-gradient-to-tr from-purple-600 to-violet-500 hover:from-purple-500 hover:to-violet-400 text-white flex items-center justify-center shadow-lg shadow-purple-900/40 hover:scale-105 active:scale-95 transition-all disabled:opacity-40 disabled:hover:scale-100"
             title={isPlaying ? 'Pause' : 'Play'}
           >
@@ -321,17 +400,39 @@ export const PlayerBar: React.FC = () => {
           <Mic2 className="w-4 h-4" />
         </button>
 
-        {/* Instrumental / Vocal Suppressor Filter Toggle */}
+        {/* Vocal Separation / Instrumental Mode Button */}
         <button
-          onClick={toggleInstrumentalMode}
-          className={`p-1.5 rounded-lg text-xs transition-colors ${
-            isInstrumentalMode
-              ? 'text-purple-300 bg-purple-600/25 border border-purple-500/40'
+          onClick={() => {
+            if (hasInstrumental) {
+              toggleAudioSource();
+            } else if (currentSong) {
+              openSeparationModal(currentSong);
+            }
+          }}
+          className={`p-1.5 rounded-lg text-xs transition-colors cursor-pointer relative ${
+            hasInstrumental && audioSource === 'instrumental'
+              ? 'text-cyan-300 bg-cyan-600/25 border border-cyan-500/50 shadow-sm shadow-cyan-950'
+              : hasInstrumental
+              ? 'text-purple-300 bg-purple-600/20 border border-purple-500/30'
               : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'
           }`}
-          title={isInstrumentalMode ? 'Instrumental Vocal Cut: Active' : 'Toggle Instrumental Vocal Filter'}
+          title={
+            hasInstrumental
+              ? audioSource === 'instrumental'
+                ? 'Instrumental Track: Active (Click to switch to Original)'
+                : 'Instrumental Stem Ready (Click to switch)'
+              : 'Open Vocal Separation Studio to isolate vocals or import backing track'
+          }
+          aria-label="Vocal Separation & Instrumental Track Toggle"
         >
           <Sliders className="w-4 h-4" />
+          {hasInstrumental && (
+            <span
+              className={`absolute -top-1 -right-1 w-2 h-2 rounded-full ${
+                audioSource === 'instrumental' ? 'bg-cyan-400' : 'bg-purple-400'
+              }`}
+            />
+          )}
         </button>
 
         {/* Queue Drawer Toggle */}
@@ -378,7 +479,19 @@ export const PlayerBar: React.FC = () => {
             title={`Volume: ${Math.round((isMuted ? 0 : volume) * 100)}%`}
           />
         </div>
+
+        {/* Expand Player View Button */}
+        <button
+          onClick={() => setIsExpandedPlayerOpen(true)}
+          disabled={!currentSong}
+          className="p-1.5 text-slate-400 hover:text-purple-300 rounded-lg hover:bg-slate-800/50 transition-colors disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer"
+          title="Open expanded player (Spotify style)"
+          aria-label="Open expanded player"
+        >
+          <Maximize2 className="w-4 h-4" />
+        </button>
       </div>
     </footer>
+    </>
   );
 };

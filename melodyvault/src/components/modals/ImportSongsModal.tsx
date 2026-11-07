@@ -11,6 +11,7 @@ import {
   HardDrive,
 } from 'lucide-react';
 import { ImportFileProgress } from '../../types';
+import { useMusic } from '../../context/MusicContext';
 
 interface ImportSongsModalProps {
   isOpen: boolean;
@@ -27,6 +28,7 @@ export const ImportSongsModal: React.FC<ImportSongsModalProps> = ({
   importTasks,
   isImporting,
 }) => {
+  const { syncLocalSampleMusic } = useMusic();
   const [isDragOver, setIsDragOver] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [importSummary, setImportSummary] = useState<{
@@ -142,6 +144,31 @@ export const ImportSongsModal: React.FC<ImportSongsModalProps> = ({
                 IndexedDB Persistent Storage
               </span>
             </div>
+          </div>
+
+          {/* Quick Auto-Import from Sample Music Folder */}
+          <div className="p-4 rounded-2xl bg-gradient-to-r from-purple-950/40 via-indigo-950/30 to-purple-900/40 border border-purple-500/30 flex items-center justify-between gap-4">
+            <div className="space-y-1">
+              <div className="flex items-center gap-2">
+                <Sparkles className="w-4 h-4 text-amber-400" />
+                <span className="text-xs font-bold text-white">Preloaded Sample Music Collection</span>
+                <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-purple-500/20 text-purple-300">19 Tracks</span>
+              </div>
+              <p className="text-[11px] text-slate-400">
+                Directly ingest high-quality audio & ID3 album covers from <code className="text-purple-300 font-mono">C:\MelodyVault Sample Music</code>
+              </p>
+            </div>
+            <button
+              onClick={async () => {
+                await syncLocalSampleMusic();
+                onClose();
+              }}
+              disabled={isImporting}
+              className="px-3.5 py-2 rounded-xl bg-purple-600 hover:bg-purple-500 text-white text-xs font-semibold shrink-0 shadow-md shadow-purple-900/50 flex items-center gap-1.5 transition-all cursor-pointer"
+            >
+              <span>Auto-Sync All</span>
+              <ArrowRight className="w-3.5 h-3.5" />
+            </button>
           </div>
 
           {/* Import Summary Callout */}

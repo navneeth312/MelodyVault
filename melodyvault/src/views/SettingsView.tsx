@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Settings as SettingsIcon,
   Sliders,
@@ -17,6 +17,11 @@ import {
   FileArchive,
   Sparkles,
   Trash2,
+  User,
+  Trophy,
+  Eye,
+  EyeOff,
+  Save,
 } from 'lucide-react';
 import { useMusic } from '../context/MusicContext';
 
@@ -52,11 +57,55 @@ export const SettingsView: React.FC = () => {
     setIsCleanupModalOpen,
     cleanupBackup,
     restoreDemoMusic,
+    userProfile,
+    updateUserProfile,
+    setIsOnboardingOpen,
+    logoutCreator,
+    logoutAllCreatorDevices,
   } = useMusic();
+
+  const [displayName, setDisplayName] = useState(userProfile.name);
+  const [bio, setBio] = useState(userProfile.bio || '');
+  const [tag, setTag] = useState(userProfile.tag || '');
+  const [avatarUrl, setAvatarUrl] = useState(userProfile.avatar);
+  const [joinedLeaderboard, setJoinedLeaderboard] = useState(userProfile.joinedLeaderboard ?? true);
+
+  useEffect(() => {
+    setDisplayName(userProfile.name);
+    setBio(userProfile.bio || '');
+    setTag(userProfile.tag || '');
+    setAvatarUrl(userProfile.avatar);
+    setJoinedLeaderboard(userProfile.joinedLeaderboard ?? true);
+  }, [userProfile]);
 
   const [importJsonText, setImportJsonText] = useState('');
   const [showImportBox, setShowImportBox] = useState(false);
   const [isResetConfirmOpen, setIsResetConfirmOpen] = useState(false);
+
+  const handleSaveProfile = async (e: React.FormEvent) => {
+    e.preventDefault();
+    await updateUserProfile({
+      name: displayName.trim() || userProfile.name,
+      bio,
+      tag,
+      avatar: avatarUrl,
+      joinedLeaderboard,
+    });
+    showToast('Profile updated successfully!', 'success');
+  };
+
+  const handleProfileImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onload = () => {
+        if (typeof reader.result === 'string') {
+          setAvatarUrl(reader.result);
+        }
+      };
+      reader.readAsDataURL(file);
+    }
+  };
 
   const handleExport = () => {
     const jsonStr = exportDataJSON();
@@ -124,6 +173,163 @@ export const SettingsView: React.FC = () => {
           <span>Storage: Browser LocalStorage (Synchronous JSON)</span>
         </div>
       </div>
+
+      {/* Personal Listener Profile & Leaderboard Preferences */}
+      <section className="bg-[#12131f] border border-purple-500/30 rounded-3xl p-6 md:p-8 space-y-6 shadow-xl relative overflow-hidden">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+          <div>
+            <h3 className="text-base font-bold text-white tracking-tight flex items-center gap-2">
+              <User className="w-5 h-5 text-purple-400" />
+              <span>Personal Listener Profile & Identity</span>
+            </h3>
+            <p className="text-xs text-slate-400 mt-1">
+              Customize your display name, avatar, and shared global leaderboard visibility.
+            </p>
+          </div>
+
+          <button
+            type="button"
+            onClick={() => setIsOnboardingOpen(true)}
+            className="px-3.5 py-1.5 bg-[#1b1c2b] hover:bg-[#25273d] border border-[#2e3048] text-slate-200 rounded-xl text-xs font-semibold transition-all cursor-pointer"
+          >
+            Relaunch Setup Wizard
+          </button>
+        </div>
+
+        <form onSubmit={handleSaveProfile} className="space-y-5">
+          <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4 p-4 rounded-2xl bg-[#171829] border border-[#272944]">
+            <img
+              src={avatarUrl || '/avatars/navneeth_u.jpg'}
+              alt={displayName}
+              className="w-16 h-16 rounded-full object-cover ring-2 ring-purple-500/50 shadow-md shrink-0"
+            />
+            <div className="space-y-1.5">
+              <div className="text-sm font-bold text-white">{displayName || 'Collector'}</div>
+              <div className="text-xs text-purple-300">{tag || 'Personal Vault Curator'}</div>
+              <div className="flex items-center gap-2 pt-1">
+                <label className="flex items-center gap-1.5 px-3 py-1 bg-[#202236] hover:bg-[#282a44] border border-[#303352] rounded-lg text-xs text-slate-200 cursor-pointer transition-colors">
+                  <Upload className="w-3.5 h-3.5 text-purple-400" />
+                  <span>Upload New Photo</span>
+                  <input
+                    type="file"
+                    accept="image/*"
+                    className="hidden"
+                    onChange={handleProfileImageUpload}
+                  />
+                </label>
+                {userProfile.id === 'user-navneeth' ? (
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => logoutCreator()}
+                      className="px-2.5 py-1 text-[11px] bg-red-950/40 hover:bg-red-900/50 text-red-300 border border-red-800/40 rounded-lg cursor-pointer transition-colors"
+                      title="Log out of this device session"
+                    >
+                      Log Out
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => logoutAllCreatorDevices()}
+                      className="px-2.5 py-1 text-[11px] bg-purple-950/40 hover:bg-purple-900/50 text-purple-300 border border-purple-800/40 rounded-lg cursor-pointer transition-colors"
+                      title="Revoke session on all devices"
+                    >
+                      Log Out All Devices
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => setIsOnboardingOpen(true)}
+                    className="px-2.5 py-1 text-[11px] bg-purple-950/40 hover:bg-purple-900/50 text-purple-300 border border-purple-800/40 rounded-lg cursor-pointer transition-colors"
+                  >
+                    Authenticate as Creator (Passkey Required)
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+                Display Name
+              </label>
+              <input
+                type="text"
+                required
+                value={displayName}
+                onChange={(e) => setDisplayName(e.target.value)}
+                className="w-full px-3 py-2 bg-[#18192a] border border-[#26283d] focus:border-purple-500 rounded-xl text-xs text-white focus:outline-none"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+                Role / Title
+              </label>
+              <input
+                type="text"
+                value={tag}
+                onChange={(e) => setTag(e.target.value)}
+                className="w-full px-3 py-2 bg-[#18192a] border border-[#26283d] focus:border-purple-500 rounded-xl text-xs text-white focus:outline-none"
+              />
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+              Personal Bio
+            </label>
+            <input
+              type="text"
+              value={bio}
+              onChange={(e) => setBio(e.target.value)}
+              className="w-full px-3 py-2 bg-[#18192a] border border-[#26283d] focus:border-purple-500 rounded-xl text-xs text-white focus:outline-none"
+            />
+          </div>
+
+          {/* Leaderboard Opt-in Toggle */}
+          <div className="p-4 rounded-2xl bg-[#171829] border border-[#272944] flex items-center justify-between gap-4">
+            <div className="flex items-center gap-3">
+              <div className="w-8 h-8 rounded-lg bg-amber-500/10 border border-amber-500/30 flex items-center justify-center shrink-0">
+                <Trophy className="w-4 h-4 text-amber-400" />
+              </div>
+              <div>
+                <div className="text-xs font-semibold text-white">
+                  Shared Global Leaderboard Participation
+                </div>
+                <div className="text-[11px] text-slate-400">
+                  Allow your level, tier, and verified XP to be listed on the public leaderboard.
+                </div>
+              </div>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setJoinedLeaderboard(!joinedLeaderboard)}
+              className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                joinedLeaderboard ? 'bg-purple-600' : 'bg-slate-700'
+              }`}
+            >
+              <span
+                className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                  joinedLeaderboard ? 'translate-x-5' : 'translate-x-0'
+                }`}
+              />
+            </button>
+          </div>
+
+          <div className="flex justify-end">
+            <button
+              type="submit"
+              className="flex items-center gap-2 px-5 py-2.5 bg-gradient-to-r from-purple-600 to-violet-600 hover:from-purple-500 hover:to-violet-500 text-white rounded-xl text-xs font-semibold shadow-lg shadow-purple-900/30 transition-all cursor-pointer"
+            >
+              <Save className="w-4 h-4" />
+              <span>Save Profile Changes</span>
+            </button>
+          </div>
+        </form>
+      </section>
 
       {/* Audio Engine Configuration */}
       <section className="bg-[#12131f] border border-[#212338] rounded-3xl p-6 md:p-8 space-y-6 shadow-xl">
